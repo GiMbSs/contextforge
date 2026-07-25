@@ -42,12 +42,14 @@ from contextforge.domain.identifiers import (
     new_retrieval_id,
     new_task_id,
 )
+from contextforge.domain.paths import ArtifactPath, ProjectPath
 from contextforge.domain.projects import ProjectIdentity, ProjectState
 from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecification
 
 __all__ = [
     "EXECUTION_STAGE_ORDER",
     "ApprovalId",
+    "ArtifactPath",
     "ConfigurationFingerprint",
     "ContentFingerprint",
     "ContextBundleId",
@@ -65,6 +67,7 @@ __all__ = [
     "ProjectFingerprint",
     "ProjectId",
     "ProjectIdentity",
+    "ProjectPath",
     "ProjectState",
     "ProposalFingerprint",
     "RequestedOutput",
