@@ -60,6 +60,15 @@ class ArtifactAvailability(StrEnum):
     SKIPPED = "skipped"
 
 
+class DiscoveryStatus(StrEnum):
+    """Canonical completion state of a Project Inventory."""
+
+    COMPLETE = "complete"
+    COMPLETE_WITH_WARNINGS = "complete_with_warnings"
+    INCOMPLETE = "incomplete"
+    FAILED = "failed"
+
+
 def _normalize_metadata(metadata: ArtifactMetadata) -> ArtifactMetadata:
     normalized: list[tuple[str, ArtifactMetadataValue]] = []
     seen: set[str] = set()
@@ -190,6 +199,7 @@ class ProjectInventory:
     scanner_version: str
     applied_exclusion_rules: tuple[str, ...] = ()
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
+    status: DiscoveryStatus = DiscoveryStatus.COMPLETE
 
     def __post_init__(self) -> None:
         if not isinstance(self.inventory_id, InventoryId):
@@ -220,6 +230,8 @@ class ProjectInventory:
             raise ValueError("Applied exclusion rules must be non-empty strings")
         if not isinstance(self.diagnostics, DiagnosticCollection):
             raise TypeError("diagnostics must be a DiagnosticCollection")
+        if not isinstance(self.status, DiscoveryStatus):
+            raise TypeError("status must be a DiscoveryStatus")
         object.__setattr__(
             self,
             "artifacts",
@@ -234,3 +246,17 @@ class ProjectInventory:
 
     def __hash__(self) -> int:
         return hash(self.inventory_id)
+
+    def semantically_equivalent_to(self, other: ProjectInventory) -> bool:
+        """Compare repeatable scan semantics while ignoring run identity and time."""
+        if not isinstance(other, ProjectInventory):
+            return False
+        return (
+            self.project_id == other.project_id
+            and self.project_fingerprint == other.project_fingerprint
+            and self.status is other.status
+            and self.applied_exclusion_rules == other.applied_exclusion_rules
+            and self.statistics == other.statistics
+            and self.diagnostics == other.diagnostics
+            and self.scanner_version == other.scanner_version
+        )

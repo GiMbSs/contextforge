@@ -1,5 +1,11 @@
 """Project Scanner Core contracts."""
 
+from contextforge.scanner.classification import (
+    MAX_CLASSIFICATION_SAMPLE_BYTES,
+    ArtifactClassifier,
+    ClassificationResult,
+    DeterministicArtifactClassifier,
+)
 from contextforge.scanner.ignore import (
     DEFAULT_EXCLUSION_PATTERNS,
     IgnoreAction,
@@ -8,10 +14,16 @@ from contextforge.scanner.ignore import (
     IgnoreRule,
     IgnoreRuleSource,
 )
+from contextforge.scanner.inventory import (
+    SCANNER_VERSION,
+    ClassifiedEntry,
+    ProjectInventoryBuilder,
+)
 from contextforge.scanner.models import (
     ArtifactAvailability,
     ArtifactClassification,
     ArtifactKind,
+    DiscoveryStatus,
     ProjectArtifact,
     ProjectInventory,
     ScanRequest,
@@ -27,9 +39,16 @@ from contextforge.scanner.traversal import (
 
 __all__ = [
     "DEFAULT_EXCLUSION_PATTERNS",
+    "MAX_CLASSIFICATION_SAMPLE_BYTES",
+    "SCANNER_VERSION",
     "ArtifactAvailability",
     "ArtifactClassification",
+    "ArtifactClassifier",
     "ArtifactKind",
+    "ClassificationResult",
+    "ClassifiedEntry",
+    "DeterministicArtifactClassifier",
+    "DiscoveryStatus",
     "IgnoreAction",
     "IgnoreDecision",
     "IgnorePolicy",
@@ -37,6 +56,7 @@ __all__ = [
     "IgnoreRuleSource",
     "ProjectArtifact",
     "ProjectInventory",
+    "ProjectInventoryBuilder",
     "ProjectScanner",
     "ProjectTraversal",
     "ScanRequest",
