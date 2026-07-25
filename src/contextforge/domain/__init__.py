@@ -23,6 +23,7 @@ from contextforge.domain.identifiers import (
     PatchProposalId,
     ProjectId,
     RetrievalId,
+    TaskId,
     new_approval_id,
     new_context_bundle_id,
     new_execution_id,
@@ -33,7 +34,9 @@ from contextforge.domain.identifiers import (
     new_patch_proposal_id,
     new_project_id,
     new_retrieval_id,
+    new_task_id,
 )
+from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecification
 
 __all__ = [
     "ApprovalId",
@@ -51,7 +54,11 @@ __all__ = [
     "ProjectFingerprint",
     "ProjectId",
     "ProposalFingerprint",
+    "RequestedOutput",
     "RetrievalId",
+    "TaskId",
+    "TaskKind",
+    "TaskSpecification",
     "fingerprint_configuration",
     "fingerprint_content",
     "fingerprint_project",
@@ -66,4 +73,5 @@ __all__ = [
     "new_patch_proposal_id",
     "new_project_id",
     "new_retrieval_id",
+    "new_task_id",
 ]

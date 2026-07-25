@@ -47,6 +47,13 @@ class ExecutionId(_Identifier):
 
 
 @dataclass(frozen=True, slots=True)
+class TaskId(_Identifier):
+    """Identity of one requested engineering task."""
+
+    prefix: ClassVar[str] = "task"
+
+
+@dataclass(frozen=True, slots=True)
 class InventoryId(_Identifier):
     """Identity of an immutable Project Inventory."""
 
@@ -114,6 +121,11 @@ def new_project_id() -> ProjectId:
 def new_execution_id() -> ExecutionId:
     """Generate a new Execution Identifier."""
     return _new_identifier(ExecutionId)
+
+
+def new_task_id() -> TaskId:
+    """Generate a new Task Identifier."""
+    return _new_identifier(TaskId)
 
 
 def new_inventory_id() -> InventoryId:

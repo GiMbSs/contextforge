@@ -16,6 +16,7 @@ from contextforge.domain import (
     PatchProposalId,
     ProjectId,
     RetrievalId,
+    TaskId,
     new_approval_id,
     new_context_bundle_id,
     new_execution_id,
@@ -26,11 +27,13 @@ from contextforge.domain import (
     new_patch_proposal_id,
     new_project_id,
     new_retrieval_id,
+    new_task_id,
 )
 
 IDENTIFIER_CASES = (
     (ProjectId, new_project_id),
     (ExecutionId, new_execution_id),
+    (TaskId, new_task_id),
     (InventoryId, new_inventory_id),
     (IndexId, new_index_id),
     (RetrievalId, new_retrieval_id),
