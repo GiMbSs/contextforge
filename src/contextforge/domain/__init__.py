@@ -1,5 +1,17 @@
 """Provider-independent ContextForge domain primitives."""
 
+from contextforge.domain.fingerprints import (
+    ConfigurationFingerprint,
+    ContentFingerprint,
+    FingerprintOrdering,
+    LineEndingPolicy,
+    ProjectFingerprint,
+    ProposalFingerprint,
+    fingerprint_configuration,
+    fingerprint_content,
+    fingerprint_project,
+    fingerprint_proposal,
+)
 from contextforge.domain.identifiers import (
     ApprovalId,
     ContextBundleId,
@@ -25,15 +37,25 @@ from contextforge.domain.identifiers import (
 
 __all__ = [
     "ApprovalId",
+    "ConfigurationFingerprint",
+    "ContentFingerprint",
     "ContextBundleId",
     "ExecutionId",
+    "FingerprintOrdering",
     "IndexId",
     "InferenceRequestId",
     "InferenceResponseId",
     "InventoryId",
+    "LineEndingPolicy",
     "PatchProposalId",
+    "ProjectFingerprint",
     "ProjectId",
+    "ProposalFingerprint",
     "RetrievalId",
+    "fingerprint_configuration",
+    "fingerprint_content",
+    "fingerprint_project",
+    "fingerprint_proposal",
     "new_approval_id",
     "new_context_bundle_id",
     "new_execution_id",
