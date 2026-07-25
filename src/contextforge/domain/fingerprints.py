@@ -77,6 +77,13 @@ class ProposalFingerprint(_Fingerprint):
     prefix: ClassVar[str] = "proposal"
 
 
+@dataclass(frozen=True, slots=True)
+class ArtifactFingerprint(_Fingerprint):
+    """Fingerprint of one artifact's relevant content and metadata."""
+
+    prefix: ClassVar[str] = "artifact"
+
+
 def _normalize_text(value: str, line_endings: LineEndingPolicy) -> str:
     normalized = unicodedata.normalize("NFC", value)
     if line_endings is LineEndingPolicy.NORMALIZE_LF:

@@ -7,6 +7,7 @@ from contextforge.domain.executions import (
     ExecutionStatus,
 )
 from contextforge.domain.fingerprints import (
+    ArtifactFingerprint,
     ConfigurationFingerprint,
     ContentFingerprint,
     FingerprintOrdering,
@@ -51,6 +52,7 @@ from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecificati
 __all__ = [
     "EXECUTION_STAGE_ORDER",
     "ApprovalId",
+    "ArtifactFingerprint",
     "ArtifactId",
     "ArtifactPath",
     "ConfigurationFingerprint",

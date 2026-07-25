@@ -30,6 +30,7 @@ class TraversalEntry:
     entry_type: TraversalEntryType
     size_bytes: int
     is_symlink: bool = False
+    modified_time_ns: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.path, ArtifactPath):
@@ -42,6 +43,10 @@ class TraversalEntry:
             raise ValueError("size_bytes must not be negative")
         if type(self.is_symlink) is not bool:
             raise TypeError("is_symlink must be a boolean")
+        if type(self.modified_time_ns) is not int:
+            raise TypeError("modified_time_ns must be an integer")
+        if self.modified_time_ns < 0:
+            raise ValueError("modified_time_ns must not be negative")
 
 
 @dataclass(frozen=True, slots=True)

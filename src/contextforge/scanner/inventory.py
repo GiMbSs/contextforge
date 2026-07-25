@@ -11,6 +11,7 @@ from contextforge.diagnostics import (
     DiagnosticSeverity,
 )
 from contextforge.domain import (
+    ArtifactFingerprint,
     ArtifactId,
     FingerprintOrdering,
     InventoryId,
@@ -41,6 +42,8 @@ class ClassifiedEntry:
     entry: TraversalEntry
     classification: ClassificationResult
     availability: ArtifactAvailability = ArtifactAvailability.INCLUDED
+    fingerprint: ArtifactFingerprint | None = None
+    content_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.entry, TraversalEntry):
@@ -49,6 +52,12 @@ class ClassifiedEntry:
             raise TypeError("classification must be a ClassificationResult")
         if not isinstance(self.availability, ArtifactAvailability):
             raise TypeError("availability must be an ArtifactAvailability")
+        if self.fingerprint is not None and not isinstance(self.fingerprint, ArtifactFingerprint):
+            raise TypeError("fingerprint must be an ArtifactFingerprint")
+        if self.content_fingerprint is not None and not self.content_fingerprint.startswith(
+            "sha256:"
+        ):
+            raise ValueError("content_fingerprint must use SHA-256")
 
 
 def _artifact_id(project_id: ProjectId, path: str) -> ArtifactId:
@@ -72,14 +81,23 @@ def _serialized_rules(policy: IgnorePolicy) -> tuple[str, ...]:
     )
 
 
-def _artifact_components(artifact: ProjectArtifact) -> tuple[str, ...]:
-    metadata = ",".join(f"{key}={value!r}" for key, value in artifact.metadata)
+def _artifact_components(
+    artifact: ProjectArtifact,
+    *,
+    include_timestamp: bool,
+) -> tuple[str, ...]:
+    metadata = ",".join(
+        f"{key}={value!r}"
+        for key, value in artifact.metadata
+        if include_timestamp or key != "modified_time_ns"
+    )
     classifications = ",".join(item.value for item in artifact.classifications)
     return (
         f"artifact.path={artifact.path.value}",
         f"artifact.kind={artifact.kind.value}",
         f"artifact.classifications={classifications}",
         f"artifact.availability={artifact.availability.value}",
+        f"artifact.fingerprint={artifact.fingerprint}",
         f"artifact.metadata={metadata}",
     )
 
@@ -103,6 +121,7 @@ class ProjectInventoryBuilder:
         diagnostics: DiagnosticCollection,
         *,
         classification_complete: bool = True,
+        artifacts_reused: int = 0,
         inventory_id: InventoryId | None = None,
         discovered_at: datetime | None = None,
     ) -> ProjectInventory:
@@ -135,13 +154,16 @@ class ProjectInventoryBuilder:
                 kind=item.classification.kind,
                 classifications=item.classification.classifications,
                 availability=item.availability,
+                fingerprint=item.fingerprint,
                 metadata=tuple(
                     (key, value)
                     for key, value in (
                         ("classification_evidence", "|".join(item.classification.evidence)),
                         ("detected_language", item.classification.detected_language),
                         ("encoding", item.classification.encoding),
+                        ("content_fingerprint", item.content_fingerprint),
                         ("is_symlink", item.entry.is_symlink),
+                        ("modified_time_ns", item.entry.modified_time_ns),
                         ("size_bytes", item.entry.size_bytes),
                     )
                     if value is not None and value != ""
@@ -158,7 +180,12 @@ class ProjectInventoryBuilder:
             *(f"ignore_rule={rule}" for rule in rules),
         ]
         for artifact in artifacts:
-            components.extend(_artifact_components(artifact))
+            components.extend(
+                _artifact_components(
+                    artifact,
+                    include_timestamp=request.configuration.invalidate_on_timestamp_change,
+                )
+            )
         project_fingerprint = fingerprint_project(
             tuple(components),
             ordering=FingerprintOrdering.ORDERED,
@@ -177,6 +204,7 @@ class ProjectInventoryBuilder:
             unreadable_paths=(traversal.statistics.unreadable_paths + classification_unreadable),
             total_bytes=traversal.statistics.total_bytes,
             duration_seconds=0.0,
+            artifacts_reused=artifacts_reused,
         )
         has_errors = any(
             item.severity in (DiagnosticSeverity.ERROR, DiagnosticSeverity.CRITICAL)

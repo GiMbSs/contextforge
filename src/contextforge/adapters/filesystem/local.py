@@ -244,6 +244,7 @@ class LocalProjectTraversal:
                             entry_type,
                             metadata.st_size,
                             is_symlink,
+                            metadata.st_mtime_ns if is_file else 0,
                         )
                     )
                     included += 1

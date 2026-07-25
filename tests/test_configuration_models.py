@@ -54,6 +54,7 @@ def test_unknown_keys_are_reported_deterministically() -> None:
         {
             "exclude_patterns",
             "follow_symlinks",
+            "invalidate_on_timestamp_change",
             "max_depth",
             "max_file_size_bytes",
             "use_default_exclusions",

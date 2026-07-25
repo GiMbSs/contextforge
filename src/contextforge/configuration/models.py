@@ -55,6 +55,7 @@ class ScannerConfig(ConfigModel):
     follow_symlinks: bool = False
     max_file_size_bytes: int = 1_000_000
     max_depth: int | None = None
+    invalidate_on_timestamp_change: bool = False
 
     def __post_init__(self) -> None:
         patterns = tuple(self.exclude_patterns)

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 
 from contextforge.configuration import ScannerConfig
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
+    ArtifactFingerprint,
     ArtifactId,
     ArtifactPath,
     InventoryId,
@@ -115,6 +116,7 @@ class ProjectArtifact:
     classifications: tuple[ArtifactClassification, ...]
     availability: ArtifactAvailability = ArtifactAvailability.INCLUDED
     metadata: ArtifactMetadata = ()
+    fingerprint: ArtifactFingerprint | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.artifact_id, ArtifactId):
@@ -137,6 +139,8 @@ class ProjectArtifact:
             raise ValueError("Artifact classifications must not contain duplicates")
         if not isinstance(self.availability, ArtifactAvailability):
             raise TypeError("availability must be an ArtifactAvailability")
+        if self.fingerprint is not None and not isinstance(self.fingerprint, ArtifactFingerprint):
+            raise TypeError("fingerprint must be an ArtifactFingerprint")
         object.__setattr__(
             self,
             "classifications",
@@ -165,6 +169,7 @@ class ScanStatistics:
     unreadable_paths: int = 0
     total_bytes: int = 0
     duration_seconds: float = 0.0
+    artifacts_reused: int = 0
 
     def __post_init__(self) -> None:
         counts = (
@@ -175,6 +180,7 @@ class ScanStatistics:
             self.unsupported_artifacts,
             self.unreadable_paths,
             self.total_bytes,
+            self.artifacts_reused,
         )
         if any(type(count) is not int for count in counts):
             raise TypeError("Scan statistic counts must be integers")
@@ -256,7 +262,8 @@ class ProjectInventory:
             and self.project_fingerprint == other.project_fingerprint
             and self.status is other.status
             and self.applied_exclusion_rules == other.applied_exclusion_rules
-            and self.statistics == other.statistics
+            and replace(self.statistics, artifacts_reused=0)
+            == replace(other.statistics, artifacts_reused=0)
             and self.diagnostics == other.diagnostics
             and self.scanner_version == other.scanner_version
         )
