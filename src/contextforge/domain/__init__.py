@@ -1,5 +1,11 @@
 """Provider-independent ContextForge domain primitives."""
 
+from contextforge.domain.executions import (
+    EXECUTION_STAGE_ORDER,
+    Execution,
+    ExecutionStage,
+    ExecutionStatus,
+)
 from contextforge.domain.fingerprints import (
     ConfigurationFingerprint,
     ContentFingerprint,
@@ -36,14 +42,19 @@ from contextforge.domain.identifiers import (
     new_retrieval_id,
     new_task_id,
 )
+from contextforge.domain.projects import ProjectIdentity, ProjectState
 from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecification
 
 __all__ = [
+    "EXECUTION_STAGE_ORDER",
     "ApprovalId",
     "ConfigurationFingerprint",
     "ContentFingerprint",
     "ContextBundleId",
+    "Execution",
     "ExecutionId",
+    "ExecutionStage",
+    "ExecutionStatus",
     "FingerprintOrdering",
     "IndexId",
     "InferenceRequestId",
@@ -53,6 +64,8 @@ __all__ = [
     "PatchProposalId",
     "ProjectFingerprint",
     "ProjectId",
+    "ProjectIdentity",
+    "ProjectState",
     "ProposalFingerprint",
     "RequestedOutput",
     "RetrievalId",
