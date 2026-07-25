@@ -167,6 +167,8 @@ class Symbol:
     qualified_name: str | None = None
     signature: str | None = None
     parent_symbol_id: str | None = None
+    language: str | None = None
+    metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         _require_identifier(self.symbol_id, "symbol_id")
@@ -183,9 +185,18 @@ class Symbol:
             (self.qualified_name, "qualified_name"),
             (self.signature, "signature"),
             (self.parent_symbol_id, "parent_symbol_id"),
+            (self.language, "language"),
         ):
             if value is not None:
                 _require_text(value, field_name)
+        metadata = tuple(self.metadata)
+        keys = tuple(key for key, _ in metadata)
+        if len(set(keys)) != len(keys):
+            raise ValueError("Symbol metadata keys must be unique")
+        for key, value in metadata:
+            _require_text(key, "metadata key")
+            _require_text(value, "metadata value")
+        object.__setattr__(self, "metadata", tuple(sorted(metadata)))
 
 
 @dataclass(frozen=True, slots=True)

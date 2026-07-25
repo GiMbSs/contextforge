@@ -32,10 +32,16 @@ from contextforge.indexer.python_ast import (
     PythonImportedName,
     PythonModule,
 )
+from contextforge.indexer.python_symbols import (
+    PYTHON_SYMBOL_STRATEGY_VERSION,
+    PythonSymbolBuilder,
+    PythonSymbolResult,
+)
 
 __all__ = [
     "GENERIC_TEXT_STRATEGY_VERSION",
     "PYTHON_AST_STRATEGY_VERSION",
+    "PYTHON_SYMBOL_STRATEGY_VERSION",
     "GenericTextIndexConfig",
     "GenericTextIndexResult",
     "GenericTextIndexer",
@@ -54,6 +60,8 @@ __all__ = [
     "PythonImport",
     "PythonImportedName",
     "PythonModule",
+    "PythonSymbolBuilder",
+    "PythonSymbolResult",
     "Relationship",
     "RelationshipKind",
     "SearchUnit",
