@@ -21,9 +21,21 @@ from contextforge.indexer.models import (
     SymbolKind,
 )
 from contextforge.indexer.ports import Indexer, IndexStorage
+from contextforge.indexer.python_ast import (
+    PYTHON_AST_STRATEGY_VERSION,
+    PythonAstParser,
+    PythonAstResult,
+    PythonDecorator,
+    PythonDefinition,
+    PythonDefinitionKind,
+    PythonImport,
+    PythonImportedName,
+    PythonModule,
+)
 
 __all__ = [
     "GENERIC_TEXT_STRATEGY_VERSION",
+    "PYTHON_AST_STRATEGY_VERSION",
     "GenericTextIndexConfig",
     "GenericTextIndexResult",
     "GenericTextIndexer",
@@ -34,6 +46,14 @@ __all__ = [
     "Indexer",
     "IndexingState",
     "ProjectIndex",
+    "PythonAstParser",
+    "PythonAstResult",
+    "PythonDecorator",
+    "PythonDefinition",
+    "PythonDefinitionKind",
+    "PythonImport",
+    "PythonImportedName",
+    "PythonModule",
     "Relationship",
     "RelationshipKind",
     "SearchUnit",
