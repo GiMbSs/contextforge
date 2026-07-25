@@ -18,6 +18,12 @@ from contextforge.scanner.models import (
     ScanStatistics,
 )
 from contextforge.scanner.ports import ProjectScanner
+from contextforge.scanner.traversal import (
+    ProjectTraversal,
+    TraversalEntry,
+    TraversalEntryType,
+    TraversalResult,
+)
 
 __all__ = [
     "DEFAULT_EXCLUSION_PATTERNS",
@@ -32,6 +38,10 @@ __all__ = [
     "ProjectArtifact",
     "ProjectInventory",
     "ProjectScanner",
+    "ProjectTraversal",
     "ScanRequest",
     "ScanStatistics",
+    "TraversalEntry",
+    "TraversalEntryType",
+    "TraversalResult",
 ]

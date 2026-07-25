@@ -271,3 +271,25 @@ class IgnorePolicy:
             key=lambda item: item[0],
         )[1]
         return IgnoreDecision(path, winning_rule.action, winning_rule)
+
+    def can_prune(self, decision: IgnoreDecision) -> bool:
+        """Whether an excluded directory can be skipped without hiding an override."""
+        if not decision.is_excluded or decision.matched_rule is None:
+            return False
+        winning_rule = decision.matched_rule
+        matching_indices = tuple(
+            index for index, rule in enumerate(self.rules) if rule is winning_rule
+        )
+        if not matching_indices:
+            return False
+        winning_index = matching_indices[-1]
+        winning_precedence = _SOURCE_PRECEDENCE[winning_rule.source]
+        for index, rule in enumerate(self.rules):
+            if rule.action is not IgnoreAction.INCLUDE or not self.allow_include_overrides:
+                continue
+            precedence = _SOURCE_PRECEDENCE[rule.source]
+            if precedence < winning_precedence or (
+                precedence == winning_precedence and index > winning_index
+            ):
+                return False
+        return True
