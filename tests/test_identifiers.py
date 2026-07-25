@@ -7,6 +7,7 @@ import pytest
 
 from contextforge.domain import (
     ApprovalId,
+    ArtifactId,
     ContextBundleId,
     ExecutionId,
     IndexId,
@@ -18,6 +19,7 @@ from contextforge.domain import (
     RetrievalId,
     TaskId,
     new_approval_id,
+    new_artifact_id,
     new_context_bundle_id,
     new_execution_id,
     new_index_id,
@@ -34,6 +36,7 @@ IDENTIFIER_CASES = (
     (ProjectId, new_project_id),
     (ExecutionId, new_execution_id),
     (TaskId, new_task_id),
+    (ArtifactId, new_artifact_id),
     (InventoryId, new_inventory_id),
     (IndexId, new_index_id),
     (RetrievalId, new_retrieval_id),

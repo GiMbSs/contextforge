@@ -20,6 +20,7 @@ from contextforge.domain.fingerprints import (
 )
 from contextforge.domain.identifiers import (
     ApprovalId,
+    ArtifactId,
     ContextBundleId,
     ExecutionId,
     IndexId,
@@ -31,6 +32,7 @@ from contextforge.domain.identifiers import (
     RetrievalId,
     TaskId,
     new_approval_id,
+    new_artifact_id,
     new_context_bundle_id,
     new_execution_id,
     new_index_id,
@@ -49,6 +51,7 @@ from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecificati
 __all__ = [
     "EXECUTION_STAGE_ORDER",
     "ApprovalId",
+    "ArtifactId",
     "ArtifactPath",
     "ConfigurationFingerprint",
     "ContentFingerprint",
@@ -80,6 +83,7 @@ __all__ = [
     "fingerprint_project",
     "fingerprint_proposal",
     "new_approval_id",
+    "new_artifact_id",
     "new_context_bundle_id",
     "new_execution_id",
     "new_index_id",

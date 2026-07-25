@@ -51,6 +51,7 @@ class ScannerConfig(ConfigModel):
     """Project discovery limits and safe traversal behavior."""
 
     exclude_patterns: tuple[str, ...] = ()
+    use_default_exclusions: bool = True
     follow_symlinks: bool = False
     max_file_size_bytes: int = 1_000_000
     max_depth: int | None = None

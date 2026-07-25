@@ -51,7 +51,13 @@ def test_unknown_keys_are_reported_deterministically() -> None:
         "mystery",
     )
     assert ScannerConfig.known_keys() == frozenset(
-        {"exclude_patterns", "follow_symlinks", "max_depth", "max_file_size_bytes"}
+        {
+            "exclude_patterns",
+            "follow_symlinks",
+            "max_depth",
+            "max_file_size_bytes",
+            "use_default_exclusions",
+        }
     )
 
 
