@@ -1,5 +1,11 @@
 """Project Indexer Core contracts."""
 
+from contextforge.indexer.generic import (
+    GENERIC_TEXT_STRATEGY_VERSION,
+    GenericTextIndexConfig,
+    GenericTextIndexer,
+    GenericTextIndexResult,
+)
 from contextforge.indexer.models import (
     IndexedArtifact,
     IndexingState,
@@ -17,6 +23,10 @@ from contextforge.indexer.models import (
 from contextforge.indexer.ports import Indexer, IndexStorage
 
 __all__ = [
+    "GENERIC_TEXT_STRATEGY_VERSION",
+    "GenericTextIndexConfig",
+    "GenericTextIndexResult",
+    "GenericTextIndexer",
     "IndexRequest",
     "IndexStatus",
     "IndexStorage",
