@@ -13,11 +13,22 @@ from contextforge.configuration.models import (
     ScannerConfig,
     SecretReference,
 )
+from contextforge.configuration.precedence import (
+    CONFIGURATION_PRECEDENCE,
+    ConfigurationSource,
+    EffectiveConfiguration,
+    EffectiveValue,
+    resolve_configuration,
+)
 
 __all__ = [
+    "CONFIGURATION_PRECEDENCE",
     "CliConfig",
     "ConfigModel",
+    "ConfigurationSource",
     "ContextConfig",
+    "EffectiveConfiguration",
+    "EffectiveValue",
     "IndexerConfig",
     "PatchConfig",
     "ProjectConfig",
@@ -26,4 +37,5 @@ __all__ = [
     "RetrieverConfig",
     "ScannerConfig",
     "SecretReference",
+    "resolve_configuration",
 ]
