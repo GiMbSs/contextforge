@@ -126,6 +126,7 @@ class ContextBudget:
     max_artifacts: int | None = None
     max_excerpts: int | None = None
     max_item_bytes: int | None = None
+    max_items: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in self.__dataclass_fields__:

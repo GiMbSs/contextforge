@@ -1,5 +1,13 @@
 """Context Retriever Core contracts."""
 
+from contextforge.retrieval.budgeting import (
+    CONTEXT_BUDGET_PLANNER_VERSION,
+    BudgetSelectionResult,
+    BudgetUsage,
+    CandidateBudgetEstimate,
+    ContextBudgetPlanner,
+    ContextBudgetReservation,
+)
 from contextforge.retrieval.dependencies import (
     DEPENDENCY_TRAVERSAL_STRATEGY_VERSION,
     DependencyTraversalConfig,
@@ -71,6 +79,7 @@ from contextforge.retrieval.structural import (
 )
 
 __all__ = [
+    "CONTEXT_BUDGET_PLANNER_VERSION",
     "DEPENDENCY_TRAVERSAL_STRATEGY_VERSION",
     "ELIGIBILITY_FILTER_VERSION",
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
@@ -79,12 +88,17 @@ __all__ = [
     "STRUCTURAL_RETRIEVAL_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
     "ArtifactEligibilityRecord",
+    "BudgetSelectionResult",
+    "BudgetUsage",
+    "CandidateBudgetEstimate",
     "CandidateEligibility",
     "CandidateEligibilityFilter",
     "CandidateOutcome",
     "CandidateScore",
     "CandidateType",
     "ContextBudget",
+    "ContextBudgetPlanner",
+    "ContextBudgetReservation",
     "ContextRetriever",
     "DependencyTraversalConfig",
     "DependencyTraversalPath",
