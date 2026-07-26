@@ -1,5 +1,10 @@
 """Patch proposal domain boundary."""
 
+from contextforge.patch.conflicts import (
+    PatchConflictValidationError,
+    PatchConflictValidator,
+    PatchConsistencyEvidence,
+)
 from contextforge.patch.envelope import (
     ProviderResponseEnvelopeValidator,
     ResponseEnvelopeValidationError,
@@ -44,6 +49,9 @@ from contextforge.patch.unified import (
 __all__ = [
     "OperationValidationPolicy",
     "PatchApprovalState",
+    "PatchConflictValidationError",
+    "PatchConflictValidator",
+    "PatchConsistencyEvidence",
     "PatchDiagnostic",
     "PatchOperation",
     "PatchOperationValidationError",
