@@ -37,10 +37,17 @@ from contextforge.retrieval.query import (
     QueryTermKind,
     TaskQueryNormalizer,
 )
+from contextforge.retrieval.structural import (
+    STRUCTURAL_RETRIEVAL_STRATEGY_VERSION,
+    StructuralRetrievalStrategy,
+    StructuralRole,
+    StructuralSearchResult,
+)
 
 __all__ = [
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
     "LEXICAL_SEARCH_STRATEGY_VERSION",
+    "STRUCTURAL_RETRIEVAL_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
     "CandidateEligibility",
     "CandidateOutcome",
@@ -67,5 +74,8 @@ __all__ = [
     "SelectionDecision",
     "SelectionRationale",
     "SelectionReason",
+    "StructuralRetrievalStrategy",
+    "StructuralRole",
+    "StructuralSearchResult",
     "TaskQueryNormalizer",
 ]
