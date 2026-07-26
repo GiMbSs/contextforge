@@ -1,5 +1,13 @@
 """Context Retriever Core contracts."""
 
+from contextforge.retrieval.explicit import (
+    EXPLICIT_REFERENCE_STRATEGY_VERSION,
+    ExplicitReferenceKind,
+    ExplicitReferenceResolution,
+    ExplicitReferenceResult,
+    ExplicitReferenceStrategy,
+    ExplicitResolutionState,
+)
 from contextforge.retrieval.models import (
     CandidateEligibility,
     CandidateOutcome,
@@ -26,12 +34,18 @@ from contextforge.retrieval.query import (
 )
 
 __all__ = [
+    "EXPLICIT_REFERENCE_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
     "CandidateEligibility",
     "CandidateOutcome",
     "CandidateType",
     "ContextBudget",
     "ContextRetriever",
+    "ExplicitReferenceKind",
+    "ExplicitReferenceResolution",
+    "ExplicitReferenceResult",
+    "ExplicitReferenceStrategy",
+    "ExplicitResolutionState",
     "NormalizedTaskQuery",
     "QueryTerm",
     "QueryTermKind",
