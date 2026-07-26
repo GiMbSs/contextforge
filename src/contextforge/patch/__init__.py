@@ -1,5 +1,10 @@
 """Patch proposal domain boundary."""
 
+from contextforge.patch.envelope import (
+    ProviderResponseEnvelopeValidator,
+    ResponseEnvelopeValidationError,
+    ValidatedResponseEnvelope,
+)
 from contextforge.patch.models import (
     PatchApprovalState,
     PatchDiagnostic,
@@ -18,4 +23,7 @@ __all__ = [
     "PatchValidationState",
     "PatchValidationSummary",
     "ProposedChange",
+    "ProviderResponseEnvelopeValidator",
+    "ResponseEnvelopeValidationError",
+    "ValidatedResponseEnvelope",
 ]
