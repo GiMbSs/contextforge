@@ -279,6 +279,11 @@ class SelectedContextItem:
     estimated_tokens: int | None = None
     content_fingerprint: str | None = None
     is_truncated: bool = False
+    estimated_bytes: int | None = None
+    estimated_characters: int | None = None
+    score_breakdown: tuple[tuple[str, float], ...] = ()
+    sensitivity_classification: str = "unclassified"
+    dependency_path: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_identifier(self.context_item_id, "context_item_id")
@@ -299,17 +304,37 @@ class SelectedContextItem:
                 raise TypeError("location must be a SourceLocation")
             if self.artifact_id != self.location.artifact_id:
                 raise ValueError("Item location must belong to its artifact")
-        if self.estimated_tokens is not None:
-            if type(self.estimated_tokens) is not int:
-                raise TypeError("estimated_tokens must be an integer")
-            if self.estimated_tokens < 0:
-                raise ValueError("estimated_tokens must not be negative")
+        for value, field_name in (
+            (self.estimated_tokens, "estimated_tokens"),
+            (self.estimated_bytes, "estimated_bytes"),
+            (self.estimated_characters, "estimated_characters"),
+        ):
+            if value is not None:
+                if type(value) is not int:
+                    raise TypeError(f"{field_name} must be an integer")
+                if value < 0:
+                    raise ValueError(f"{field_name} must not be negative")
         if self.content_fingerprint is not None and not self.content_fingerprint.startswith(
             "sha256:"
         ):
             raise ValueError("content_fingerprint must use SHA-256")
         if type(self.is_truncated) is not bool:
             raise TypeError("is_truncated must be a boolean")
+        score_breakdown = tuple(self.score_breakdown)
+        score_keys = tuple(key for key, _ in score_breakdown)
+        if len(set(score_keys)) != len(score_keys):
+            raise ValueError("score_breakdown keys must be unique")
+        if any(
+            not key.strip() or not isinstance(value, (int, float)) or not math.isfinite(value)
+            for key, value in score_breakdown
+        ):
+            raise ValueError("score_breakdown must contain named finite values")
+        _require_text(self.sensitivity_classification, "sensitivity_classification")
+        dependency_path = tuple(self.dependency_path)
+        if any(not value.strip() for value in dependency_path):
+            raise ValueError("dependency_path must contain non-empty values")
+        object.__setattr__(self, "score_breakdown", score_breakdown)
+        object.__setattr__(self, "dependency_path", dependency_path)
 
 
 @dataclass(frozen=True, slots=True)

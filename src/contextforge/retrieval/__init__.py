@@ -69,6 +69,10 @@ from contextforge.retrieval.query import (
     QueryTermKind,
     TaskQueryNormalizer,
 )
+from contextforge.retrieval.result import (
+    RETRIEVAL_RESULT_ASSEMBLER_VERSION,
+    RetrievalResultAssembler,
+)
 from contextforge.retrieval.scoring import (
     RETRIEVAL_SCORING_MODEL_VERSION,
     CandidateScore,
@@ -92,6 +96,7 @@ __all__ = [
     "ELIGIBILITY_FILTER_VERSION",
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
     "LEXICAL_SEARCH_STRATEGY_VERSION",
+    "RETRIEVAL_RESULT_ASSEMBLER_VERSION",
     "RETRIEVAL_SCORING_MODEL_VERSION",
     "STRUCTURAL_RETRIEVAL_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
@@ -135,6 +140,7 @@ __all__ = [
     "RetrievalEvidence",
     "RetrievalRequest",
     "RetrievalResult",
+    "RetrievalResultAssembler",
     "RetrievalScoreResult",
     "RetrievalScoringConfig",
     "RetrievalScoringModel",
