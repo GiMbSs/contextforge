@@ -60,6 +60,16 @@ class RelationshipKind(StrEnum):
     CONFIGURES = "configures"
     TESTS = "tests"
     DOCUMENTS = "documents"
+    DEPENDS_ON = "depends_on"
+
+
+class RelationshipResolution(StrEnum):
+    """Resolution confidence for relationship targets."""
+
+    RESOLVED_INTERNAL = "resolved_internal"
+    RESOLVED_EXTERNAL = "resolved_external"
+    UNRESOLVED = "unresolved"
+    AMBIGUOUS = "ambiguous"
 
 
 class SearchUnitKind(StrEnum):
@@ -209,6 +219,7 @@ class Relationship:
     kind: RelationshipKind
     evidence: str
     location: SourceLocation | None = None
+    resolution: RelationshipResolution = RelationshipResolution.UNRESOLVED
 
     def __post_init__(self) -> None:
         _require_identifier(self.relationship_id, "relationship_id")
@@ -219,6 +230,8 @@ class Relationship:
         _require_text(self.evidence, "evidence")
         if self.location is not None and not isinstance(self.location, SourceLocation):
             raise TypeError("location must be a SourceLocation")
+        if not isinstance(self.resolution, RelationshipResolution):
+            raise TypeError("resolution must be a RelationshipResolution")
 
 
 @dataclass(frozen=True, slots=True)

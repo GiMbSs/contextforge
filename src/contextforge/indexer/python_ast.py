@@ -63,6 +63,7 @@ class PythonImport:
     names: tuple[PythonImportedName, ...]
     level: int
     location: SourceLocation
+    scope_qualified_name: str | None = None
 
     def __post_init__(self) -> None:
         names = tuple(self.names)
@@ -78,7 +79,26 @@ class PythonImport:
             raise ValueError("level must not be negative")
         if not isinstance(self.location, SourceLocation):
             raise TypeError("location must be a SourceLocation")
+        if self.scope_qualified_name is not None and not self.scope_qualified_name.strip():
+            raise ValueError("scope_qualified_name must not be empty")
         object.__setattr__(self, "names", names)
+
+
+@dataclass(frozen=True, slots=True)
+class PythonReference:
+    """One unresolved textual name use proven by Python syntax."""
+
+    target_text: str
+    location: SourceLocation
+    scope_qualified_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.target_text.strip():
+            raise ValueError("Reference target_text must not be empty")
+        if not isinstance(self.location, SourceLocation):
+            raise TypeError("location must be a SourceLocation")
+        if self.scope_qualified_name is not None and not self.scope_qualified_name.strip():
+            raise ValueError("scope_qualified_name must not be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +137,7 @@ class PythonModule:
     location: SourceLocation
     definitions: tuple[PythonDefinition, ...] = ()
     imports: tuple[PythonImport, ...] = ()
+    references: tuple[PythonReference, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -125,12 +146,16 @@ class PythonModule:
             raise TypeError("location must be a SourceLocation")
         definitions = tuple(self.definitions)
         imports = tuple(self.imports)
+        references = tuple(self.references)
         if any(not isinstance(item, PythonDefinition) for item in definitions):
             raise TypeError("definitions must contain PythonDefinition values")
         if any(not isinstance(item, PythonImport) for item in imports):
             raise TypeError("imports must contain PythonImport values")
+        if any(not isinstance(item, PythonReference) for item in references):
+            raise TypeError("references must contain PythonReference values")
         object.__setattr__(self, "definitions", definitions)
         object.__setattr__(self, "imports", imports)
+        object.__setattr__(self, "references", references)
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +214,7 @@ class _StructureVisitor(ast.NodeVisitor):
         self.source = source
         self.definitions: list[PythonDefinition] = []
         self.imports: list[PythonImport] = []
+        self.references: list[PythonReference] = []
         self.scope: list[str] = []
 
     def _visit_definition(
@@ -235,6 +261,7 @@ class _StructureVisitor(ast.NodeVisitor):
                 tuple(PythonImportedName(alias.name, alias.asname) for alias in node.names),
                 0,
                 _location(self.artifact, node),
+                ".".join(self.scope) or None,
             )
         )
 
@@ -245,8 +272,19 @@ class _StructureVisitor(ast.NodeVisitor):
                 tuple(PythonImportedName(alias.name, alias.asname) for alias in node.names),
                 node.level,
                 _location(self.artifact, node),
+                ".".join(self.scope) or None,
             )
         )
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            self.references.append(
+                PythonReference(
+                    node.id,
+                    _location(self.artifact, node),
+                    ".".join(self.scope) or None,
+                )
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,5 +326,6 @@ class PythonAstParser:
                 _module_location(artifact, source),
                 tuple(visitor.definitions),
                 tuple(visitor.imports),
+                tuple(visitor.references),
             )
         )

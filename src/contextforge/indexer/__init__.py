@@ -14,6 +14,7 @@ from contextforge.indexer.models import (
     ProjectIndex,
     Relationship,
     RelationshipKind,
+    RelationshipResolution,
     SearchUnit,
     SearchUnitKind,
     SourceLocation,
@@ -31,6 +32,12 @@ from contextforge.indexer.python_ast import (
     PythonImport,
     PythonImportedName,
     PythonModule,
+    PythonReference,
+)
+from contextforge.indexer.python_relationships import (
+    PYTHON_RELATIONSHIP_STRATEGY_VERSION,
+    PythonRelationshipBuilder,
+    PythonRelationshipResult,
 )
 from contextforge.indexer.python_symbols import (
     PYTHON_SYMBOL_STRATEGY_VERSION,
@@ -41,6 +48,7 @@ from contextforge.indexer.python_symbols import (
 __all__ = [
     "GENERIC_TEXT_STRATEGY_VERSION",
     "PYTHON_AST_STRATEGY_VERSION",
+    "PYTHON_RELATIONSHIP_STRATEGY_VERSION",
     "PYTHON_SYMBOL_STRATEGY_VERSION",
     "GenericTextIndexConfig",
     "GenericTextIndexResult",
@@ -60,10 +68,14 @@ __all__ = [
     "PythonImport",
     "PythonImportedName",
     "PythonModule",
+    "PythonReference",
+    "PythonRelationshipBuilder",
+    "PythonRelationshipResult",
     "PythonSymbolBuilder",
     "PythonSymbolResult",
     "Relationship",
     "RelationshipKind",
+    "RelationshipResolution",
     "SearchUnit",
     "SearchUnitKind",
     "SourceLocation",
