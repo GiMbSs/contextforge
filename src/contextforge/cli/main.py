@@ -150,6 +150,57 @@ def index(ctx: typer.Context) -> None:
     _execute_project_command(ctx, "index")
 
 
+@app.command()
+def run(
+    ctx: typer.Context,
+    task: Annotated[str | None, typer.Argument(help="Task instruction text.")] = None,
+    stdin: Annotated[
+        bool,
+        typer.Option("--stdin", help="Read task instructions from standard input."),
+    ] = False,
+    task_file: Annotated[
+        Path | None,
+        typer.Option("--task-file", help="Read task instructions from a UTF-8 file."),
+    ] = None,
+    analysis_only: Annotated[
+        bool,
+        typer.Option("--analysis-only", help="Require the read-only analysis pipeline."),
+    ] = False,
+) -> None:
+    """Execute one explicitly sourced analysis-only task."""
+    if not analysis_only:
+        raise typer.BadParameter("--analysis-only is required in this increment")
+    selected = sum((task is not None, stdin, task_file is not None))
+    if selected != 1:
+        raise typer.BadParameter("exactly one of TASK, --stdin, or --task-file is required")
+    if stdin:
+        task_text = typer.get_text_stream("stdin").read()
+    elif task_file is not None:
+        try:
+            task_text = task_file.read_text(encoding="utf-8")
+        except OSError as error:
+            raise typer.BadParameter(f"task file could not be read: {task_file}") from error
+    else:
+        task_text = task or ""
+    task_text = task_text.strip()
+    if not task_text:
+        raise typer.BadParameter("task input must not be empty")
+
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.analyze(
+        root,
+        task_text,
+        options.provider or "mock-provider",
+    )
+    render_result(result, output_format=options.output_format)
+
+
 def main() -> None:
     """Run the ContextForge CLI adapter."""
     app()

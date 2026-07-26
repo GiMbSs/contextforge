@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
 from typing import Protocol
@@ -15,12 +16,48 @@ from contextforge.adapters.filesystem import (
     LocalProjectInitialization,
     LocalProjectScanner,
 )
-from contextforge.application import InitializeProject, ProjectInitialization
+from contextforge.application import (
+    AnalysisExecutionPipeline,
+    ExecuteTask,
+    InitializeProject,
+    ProjectInitialization,
+)
 from contextforge.configuration import ScannerConfig
+from contextforge.context import (
+    ContextBundle,
+    ContextCoverage,
+    ContextStatistics,
+)
 from contextforge.diagnostics import DiagnosticCollection
-from contextforge.domain import ProjectId
-from contextforge.indexer import DeterministicProjectIndexer, IndexRequest
+from contextforge.domain import (
+    IndexId,
+    InventoryId,
+    ProjectId,
+    RequestedOutput,
+    TaskKind,
+    TaskSpecification,
+    new_context_bundle_id,
+    new_retrieval_id,
+    new_task_id,
+)
+from contextforge.indexer import (
+    DeterministicProjectIndexer,
+    IndexRequest,
+    ProjectIndex,
+)
 from contextforge.project import ProjectRoot, resolve_project_root
+from contextforge.provider import (
+    DeterministicMockProvider,
+    MockProviderScenario,
+    ProviderPort,
+)
+from contextforge.retrieval import (
+    ContextBudget,
+    RetrievalRequest,
+    RetrievalResult,
+    RetrievalStatistics,
+    RetrievalStatus,
+)
 from contextforge.scanner import DiscoveryStatus, ProjectArtifact, ProjectInventory, ScanRequest
 
 
@@ -54,6 +91,13 @@ class ProjectCommandGateway(Protocol):
     def scan(self, root: ProjectRoot) -> CliCommandResult: ...
 
     def index(self, root: ProjectRoot) -> CliCommandResult: ...
+
+    def analyze(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        provider_id: str,
+    ) -> CliCommandResult: ...
 
 
 @dataclass(slots=True)
@@ -159,6 +203,46 @@ class LocalProjectCommandGateway:
             _diagnostics(project_index.diagnostics),
         )
 
+    def analyze(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        provider_id: str,
+    ) -> CliCommandResult:
+        inventory = self._scan(root)
+        project_index = DeterministicProjectIndexer(_LocalSource(root.path)).index(
+            IndexRequest(inventory)
+        )
+        pipeline = AnalysisExecutionPipeline(
+            inventory_storage=_SingleInventoryStorage(inventory),
+            index_storage=_SingleIndexStorage(project_index),
+            indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
+            retriever=_EmptyRetriever(),
+            context_builder=_EmptyContextBuilder(),
+            providers=_MockProviders(),
+            budget=ContextBudget(max_items=20, max_bytes=64_000),
+        )
+        task = TaskSpecification(
+            new_task_id(),
+            task_text,
+            TaskKind.EXPLAIN,
+            RequestedOutput.ANALYSIS,
+        )
+        result = pipeline.execute(ExecuteTask(_project_id(root), task, provider_id))
+        return CliCommandResult(
+            {
+                "command": "run",
+                "findings": len(result.analysis.findings),
+                "mode": "analysis_only",
+                "project_root": str(root.path),
+                "request_id": str(result.inference_request.request_id),
+                "status": "completed",
+                "summary": result.analysis.summary,
+                "task": task_text,
+            },
+            diagnostics=_diagnostics(result.diagnostics),
+        )
+
     def _scan(self, root: ProjectRoot) -> ProjectInventory:
         return self.scanner.scan(ScanRequest(_project_id(root), root, self.scanner_configuration))
 
@@ -166,6 +250,89 @@ class LocalProjectCommandGateway:
 def _project_id(root: ProjectRoot) -> ProjectId:
     identity = uuid5(NAMESPACE_URL, root.path.as_uri())
     return ProjectId(f"project_{identity.hex}")
+
+
+@dataclass(slots=True)
+class _SingleInventoryStorage:
+    inventory: ProjectInventory
+
+    def load(self, inventory_id: InventoryId) -> ProjectInventory | None:
+        return self.inventory if inventory_id == self.inventory.inventory_id else None
+
+    def load_latest(self, project_id: ProjectId) -> ProjectInventory | None:
+        return self.inventory if project_id == self.inventory.project_id else None
+
+    def save(self, inventory: ProjectInventory) -> None:
+        self.inventory = inventory
+
+
+@dataclass(slots=True)
+class _SingleIndexStorage:
+    project_index: ProjectIndex
+
+    def load(self, project_id: ProjectId) -> ProjectIndex | None:
+        return self.project_index if project_id == self.project_index.project_id else None
+
+    def save(self, project_index: ProjectIndex) -> None:
+        self.project_index = project_index
+
+    def remove(self, index_id: IndexId) -> None:
+        if index_id == self.project_index.index_id:
+            raise ValueError("active CLI index cannot be removed")
+
+
+class _EmptyRetriever:
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        return RetrievalResult(
+            new_retrieval_id(),
+            request.task.task_id,
+            request.project_index.index_id,
+            request.project_index.project_fingerprint,
+            ("cli-empty-retriever-v1",),
+            (),
+            (),
+            (),
+            request.budget,
+            DiagnosticCollection(),
+            RetrievalStatistics(),
+            RetrievalStatus.INCOMPLETE,
+            datetime.now(UTC),
+        )
+
+
+class _EmptyContextBuilder:
+    def build(
+        self,
+        retrieval_result: RetrievalResult,
+        *,
+        project_id: ProjectId,
+    ) -> ContextBundle:
+        return ContextBundle(
+            new_context_bundle_id(),
+            retrieval_result.task_id,
+            retrieval_result.retrieval_id,
+            project_id,
+            retrieval_result.project_fingerprint,
+            (),
+            (),
+            (),
+            ContextStatistics(),
+            ContextCoverage(),
+            DiagnosticCollection(),
+            "1",
+            "cli-empty-context-v1",
+            datetime.now(UTC),
+        )
+
+
+class _MockProviders:
+    def get(self, provider_id: str) -> ProviderPort | None:
+        if provider_id != "mock-provider":
+            return None
+        return DeterministicMockProvider(
+            MockProviderScenario.SUCCESSFUL_ANALYSIS,
+            datetime.now(UTC),
+        )
 
 
 def _diagnostics(collection: DiagnosticCollection) -> tuple[dict[str, object], ...]:
