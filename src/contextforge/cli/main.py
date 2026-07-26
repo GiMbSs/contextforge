@@ -6,6 +6,12 @@ from typing import Annotated
 import typer
 
 from contextforge import __version__
+from contextforge.adapters.project_commands import (
+    CliExitCode,
+    LocalProjectCommandGateway,
+    render_result,
+    resolve_cli_project,
+)
 from contextforge.cli.options import GlobalOptions
 
 app = typer.Typer(
@@ -14,6 +20,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+_gateway = LocalProjectCommandGateway()
 
 
 def _version_callback(value: bool) -> None:
@@ -100,6 +107,47 @@ def root(
         debug=debug,
         no_color=no_color,
     )
+
+
+def _execute_project_command(ctx: typer.Context, command: str, path: Path | None = None) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(path if path is not None else options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = getattr(_gateway, command)(root)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@app.command("init")
+def initialize(
+    ctx: typer.Context,
+    path: Annotated[Path | None, typer.Argument(help="Project directory to initialize.")] = None,
+) -> None:
+    """Initialize ContextForge metadata in a project."""
+    _execute_project_command(ctx, "initialize", path)
+
+
+@app.command()
+def status(ctx: typer.Context) -> None:
+    """Display foundational ContextForge project state."""
+    _execute_project_command(ctx, "status")
+
+
+@app.command()
+def scan(ctx: typer.Context) -> None:
+    """Scan the resolved project through the scanner service."""
+    _execute_project_command(ctx, "scan")
+
+
+@app.command()
+def index(ctx: typer.Context) -> None:
+    """Build a project index from a current scan."""
+    _execute_project_command(ctx, "index")
 
 
 def main() -> None:
