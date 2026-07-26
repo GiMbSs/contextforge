@@ -1,5 +1,13 @@
 """Context Retriever Core contracts."""
 
+from contextforge.retrieval.dependencies import (
+    DEPENDENCY_TRAVERSAL_STRATEGY_VERSION,
+    DependencyTraversalConfig,
+    DependencyTraversalPath,
+    DependencyTraversalResult,
+    DependencyTraversalStep,
+    DependencyTraversalStrategy,
+)
 from contextforge.retrieval.explicit import (
     EXPLICIT_REFERENCE_STRATEGY_VERSION,
     ExplicitReferenceKind,
@@ -45,6 +53,7 @@ from contextforge.retrieval.structural import (
 )
 
 __all__ = [
+    "DEPENDENCY_TRAVERSAL_STRATEGY_VERSION",
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
     "LEXICAL_SEARCH_STRATEGY_VERSION",
     "STRUCTURAL_RETRIEVAL_STRATEGY_VERSION",
@@ -54,6 +63,11 @@ __all__ = [
     "CandidateType",
     "ContextBudget",
     "ContextRetriever",
+    "DependencyTraversalConfig",
+    "DependencyTraversalPath",
+    "DependencyTraversalResult",
+    "DependencyTraversalStep",
+    "DependencyTraversalStrategy",
     "ExplicitReferenceKind",
     "ExplicitReferenceResolution",
     "ExplicitReferenceResult",
