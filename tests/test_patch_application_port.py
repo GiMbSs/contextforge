@@ -75,6 +75,8 @@ def test_result_exposes_explicit_partial_status() -> None:
     result = PatchApplicationResult(
         new_patch_proposal_id(),
         PatchApplicationStatus.PARTIALLY_APPLIED,
+        applied_change_ids=("applied",),
+        unapplied_change_ids=("pending",),
     )
 
     assert result.status is PatchApplicationStatus.PARTIALLY_APPLIED

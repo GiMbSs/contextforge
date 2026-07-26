@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -86,6 +87,7 @@ class LocalStagedPatchApplication:
                 proposal.proposal_id,
                 PatchApplicationStatus.FAILED,
                 initial.diagnostics,
+                unapplied_change_ids=tuple(change.change_id for change in proposal.changes),
             )
 
         root = self.project_root.path.resolve(strict=True)
@@ -97,7 +99,8 @@ class LocalStagedPatchApplication:
         )
         lock_path = root / ".contextforge" / "mutation.lock"
         lock_descriptor: int | None = None
-        applied = 0
+        applied_changes: list[ProposedChange] = []
+        original_states: dict[ArtifactPath, bytes | None] = {}
         try:
             staged_files = _stage_final_files(stage, proposal)
             lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,17 +129,41 @@ class LocalStagedPatchApplication:
                     proposal.proposal_id,
                     PatchApplicationStatus.FAILED,
                     final_preflight.diagnostics,
+                    unapplied_change_ids=tuple(change.change_id for change in proposal.changes),
                 )
 
+            original_states = _capture_original_states(root, proposal)
             for change in proposal.changes:
                 _apply_change(root, change, staged_files)
-                applied += 1
+                applied_changes.append(change)
         except OSError:
-            status = (
-                PatchApplicationStatus.PARTIALLY_APPLIED
-                if applied
-                else PatchApplicationStatus.FAILED
+            applied_ids = tuple(change.change_id for change in applied_changes)
+            unapplied_ids = tuple(
+                change.change_id
+                for change in proposal.changes
+                if change.change_id not in set(applied_ids)
             )
+            rollback_verified = _rollback_and_verify(
+                root,
+                applied_changes,
+                original_states,
+            )
+            recovery_reference: str | None = None
+            if rollback_verified:
+                status = PatchApplicationStatus.FAILED
+                applied_ids = ()
+                unapplied_ids = tuple(change.change_id for change in proposal.changes)
+            else:
+                status = (
+                    PatchApplicationStatus.PARTIALLY_APPLIED
+                    if applied_ids and unapplied_ids
+                    else PatchApplicationStatus.FAILED
+                )
+                recovery_reference = _preserve_recovery_information(
+                    root,
+                    proposal,
+                    original_states,
+                )
             return PatchApplicationResult(
                 proposal.proposal_id,
                 status,
@@ -146,6 +173,10 @@ class LocalStagedPatchApplication:
                         "Filesystem application failed before all changes completed.",
                     ),
                 ),
+                applied_change_ids=applied_ids,
+                unapplied_change_ids=unapplied_ids,
+                rollback_verified=rollback_verified,
+                recovery_reference=recovery_reference,
             )
         finally:
             if lock_descriptor is not None:
@@ -157,6 +188,7 @@ class LocalStagedPatchApplication:
         return PatchApplicationResult(
             proposal.proposal_id,
             PatchApplicationStatus.APPLIED,
+            applied_change_ids=tuple(change.change_id for change in proposal.changes),
         )
 
 
@@ -209,6 +241,82 @@ def _safe_target(root: Path, path: ArtifactPath) -> Path:
     return target
 
 
+def _capture_original_states(
+    root: Path,
+    proposal: PatchProposal,
+) -> dict[ArtifactPath, bytes | None]:
+    paths = {
+        path
+        for change in proposal.changes
+        for path in (change.path, change.destination_path)
+        if path is not None
+    }
+    states: dict[ArtifactPath, bytes | None] = {}
+    for path in paths:
+        target = _safe_target(root, path)
+        states[path] = target.read_bytes() if target.exists() else None
+    return states
+
+
+def _rollback_and_verify(
+    root: Path,
+    applied_changes: list[ProposedChange],
+    original_states: dict[ArtifactPath, bytes | None],
+) -> bool:
+    try:
+        affected = {
+            path
+            for change in applied_changes
+            for path in (change.path, change.destination_path)
+            if path is not None
+        }
+        for path in sorted(affected, reverse=True):
+            target = _safe_target(root, path)
+            original = original_states[path]
+            if original is None:
+                with suppress(FileNotFoundError):
+                    target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temporary = target.with_name(f".{target.name}.contextforge-rollback")
+                temporary.write_bytes(original)
+                os.replace(temporary, target)
+        return all(
+            (
+                not _safe_target(root, path).exists()
+                if content is None
+                else _safe_target(root, path).read_bytes() == content
+            )
+            for path, content in original_states.items()
+            if path in affected
+        )
+    except OSError:
+        return False
+
+
+def _preserve_recovery_information(
+    root: Path,
+    proposal: PatchProposal,
+    original_states: dict[ArtifactPath, bytes | None],
+) -> str:
+    recovery = root / ".contextforge" / "recovery" / str(proposal.proposal_id)
+    recovery.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, str] = {}
+    for path, content in sorted(original_states.items()):
+        if content is None:
+            manifest[str(path)] = "originally_absent"
+            continue
+        backup = recovery / "original" / Path(*path.parts)
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_bytes(content)
+        manifest[str(path)] = str(backup.relative_to(recovery))
+    (recovery / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return str(recovery.relative_to(root))
+
+
 def _failure(
     proposal: PatchProposal,
     code: str,
@@ -218,6 +326,7 @@ def _failure(
         proposal.proposal_id,
         PatchApplicationStatus.FAILED,
         (_diagnostic(code, message),),
+        unapplied_change_ids=tuple(change.change_id for change in proposal.changes),
     )
 
 

@@ -3,7 +3,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from contextforge.adapters.filesystem import LocalStagedPatchApplication
+from contextforge.adapters.filesystem import patches as patch_adapter
 from contextforge.application import (
     ApplicationPreflightEvidence,
     PatchApplicationStatus,
@@ -182,5 +185,72 @@ def test_unavailable_lock_prevents_all_application(tmp_path: Path) -> None:
     result = adapter.apply_proposal(proposal, fingerprint, approval)
 
     assert result.status is PatchApplicationStatus.FAILED
+    assert result.applied_change_ids == ()
+    assert set(result.unapplied_change_ids) == {
+        "create",
+        "delete",
+        "modify",
+        "rename",
+    }
     assert (tmp_path / "modify.txt").read_text(encoding="utf-8") == "old\n"
     assert lock.read_text(encoding="utf-8") == "held"
+
+
+def test_failure_rolls_back_and_reports_verified_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, proposal, fingerprint, approval = _setup(tmp_path)
+    apply_change = patch_adapter._apply_change
+
+    def fail_during_modify(root, change, staged_files):
+        if change.change_id == "modify":
+            raise OSError("injected failure")
+        apply_change(root, change, staged_files)
+
+    monkeypatch.setattr(patch_adapter, "_apply_change", fail_during_modify)
+
+    result = adapter.apply_proposal(proposal, fingerprint, approval)
+
+    assert result.status is PatchApplicationStatus.FAILED
+    assert result.rollback_verified is True
+    assert result.applied_change_ids == ()
+    assert set(result.unapplied_change_ids) == {
+        "create",
+        "delete",
+        "modify",
+        "rename",
+    }
+    assert not (tmp_path / "nested/create.txt").exists()
+    assert (tmp_path / "delete.txt").read_text(encoding="utf-8") == "delete\n"
+    assert (tmp_path / "modify.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def test_unverified_rollback_preserves_recovery_information(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, proposal, fingerprint, approval = _setup(tmp_path)
+    apply_change = patch_adapter._apply_change
+
+    def fail_during_delete(root, change, staged_files):
+        if change.change_id == "delete":
+            raise OSError("injected failure")
+        apply_change(root, change, staged_files)
+
+    monkeypatch.setattr(patch_adapter, "_apply_change", fail_during_delete)
+    monkeypatch.setattr(
+        patch_adapter,
+        "_rollback_and_verify",
+        lambda *args: False,
+    )
+
+    result = adapter.apply_proposal(proposal, fingerprint, approval)
+
+    assert result.status is PatchApplicationStatus.PARTIALLY_APPLIED
+    assert result.applied_change_ids == ("create",)
+    assert set(result.unapplied_change_ids) == {"delete", "modify", "rename"}
+    assert result.rollback_verified is False
+    assert result.recovery_reference is not None
+    recovery = tmp_path / result.recovery_reference
+    assert (recovery / "manifest.json").is_file()

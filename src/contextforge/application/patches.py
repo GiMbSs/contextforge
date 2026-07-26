@@ -73,6 +73,10 @@ class PatchApplicationResult:
     proposal_id: PatchProposalId
     status: PatchApplicationStatus
     diagnostics: tuple[PatchDiagnostic, ...] = ()
+    applied_change_ids: tuple[str, ...] = ()
+    unapplied_change_ids: tuple[str, ...] = ()
+    rollback_verified: bool | None = None
+    recovery_reference: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.proposal_id, PatchProposalId):
@@ -83,6 +87,32 @@ class PatchApplicationResult:
         if any(not isinstance(item, PatchDiagnostic) for item in diagnostics):
             raise TypeError("diagnostics must contain PatchDiagnostic values")
         object.__setattr__(self, "diagnostics", diagnostics)
+        applied = tuple(self.applied_change_ids)
+        unapplied = tuple(self.unapplied_change_ids)
+        for values, field_name in (
+            (applied, "applied_change_ids"),
+            (unapplied, "unapplied_change_ids"),
+        ):
+            if any(not isinstance(item, str) or not item.strip() for item in values):
+                raise ValueError(f"{field_name} must contain non-empty text")
+            if len(set(values)) != len(values):
+                raise ValueError(f"{field_name} must not contain duplicates")
+        if set(applied) & set(unapplied):
+            raise ValueError("applied and unapplied change identifiers must be disjoint")
+        if type(self.rollback_verified) not in (bool, type(None)):
+            raise TypeError("rollback_verified must be a boolean or None")
+        if self.recovery_reference is not None and (
+            not isinstance(self.recovery_reference, str) or not self.recovery_reference.strip()
+        ):
+            raise ValueError("recovery_reference must be non-empty text")
+        if self.status is PatchApplicationStatus.PARTIALLY_APPLIED and (
+            not applied or not unapplied
+        ):
+            raise ValueError("partial application requires applied and unapplied changes")
+        if self.rollback_verified is True and applied:
+            raise ValueError("verified rollback cannot report applied changes")
+        object.__setattr__(self, "applied_change_ids", applied)
+        object.__setattr__(self, "unapplied_change_ids", unapplied)
 
 
 @runtime_checkable
