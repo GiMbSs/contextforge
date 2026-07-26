@@ -8,6 +8,11 @@ from contextforge.retrieval.explicit import (
     ExplicitReferenceStrategy,
     ExplicitResolutionState,
 )
+from contextforge.retrieval.lexical import (
+    LEXICAL_SEARCH_STRATEGY_VERSION,
+    LexicalSearchResult,
+    LexicalSearchStrategy,
+)
 from contextforge.retrieval.models import (
     CandidateEligibility,
     CandidateOutcome,
@@ -35,6 +40,7 @@ from contextforge.retrieval.query import (
 
 __all__ = [
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
+    "LEXICAL_SEARCH_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
     "CandidateEligibility",
     "CandidateOutcome",
@@ -46,6 +52,8 @@ __all__ = [
     "ExplicitReferenceResult",
     "ExplicitReferenceStrategy",
     "ExplicitResolutionState",
+    "LexicalSearchResult",
+    "LexicalSearchStrategy",
     "NormalizedTaskQuery",
     "QueryTerm",
     "QueryTermKind",
