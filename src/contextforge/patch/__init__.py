@@ -32,6 +32,10 @@ from contextforge.patch.paths import (
     ProtectedPathPolicy,
     ValidatedPatchPaths,
 )
+from contextforge.patch.proposal import (
+    PatchProposalMaterialization,
+    PatchProposalMaterializer,
+)
 from contextforge.patch.structured import (
     StructuredPatchParseError,
     StructuredPatchParser,
@@ -59,6 +63,8 @@ __all__ = [
     "PatchPathValidationError",
     "PatchPathValidator",
     "PatchProposal",
+    "PatchProposalMaterialization",
+    "PatchProposalMaterializer",
     "PatchSourceArtifact",
     "PatchSourceState",
     "PatchValidationState",
