@@ -8,6 +8,13 @@ from contextforge.retrieval.budgeting import (
     ContextBudgetPlanner,
     ContextBudgetReservation,
 )
+from contextforge.retrieval.closure import (
+    DEPENDENCY_CLOSURE_POLICY_VERSION,
+    ClosureAddition,
+    DependencyClosureConfig,
+    DependencyClosurePolicy,
+    DependencyClosureResult,
+)
 from contextforge.retrieval.dependencies import (
     DEPENDENCY_TRAVERSAL_STRATEGY_VERSION,
     DependencyTraversalConfig,
@@ -80,6 +87,7 @@ from contextforge.retrieval.structural import (
 
 __all__ = [
     "CONTEXT_BUDGET_PLANNER_VERSION",
+    "DEPENDENCY_CLOSURE_POLICY_VERSION",
     "DEPENDENCY_TRAVERSAL_STRATEGY_VERSION",
     "ELIGIBILITY_FILTER_VERSION",
     "EXPLICIT_REFERENCE_STRATEGY_VERSION",
@@ -96,10 +104,14 @@ __all__ = [
     "CandidateOutcome",
     "CandidateScore",
     "CandidateType",
+    "ClosureAddition",
     "ContextBudget",
     "ContextBudgetPlanner",
     "ContextBudgetReservation",
     "ContextRetriever",
+    "DependencyClosureConfig",
+    "DependencyClosurePolicy",
+    "DependencyClosureResult",
     "DependencyTraversalConfig",
     "DependencyTraversalPath",
     "DependencyTraversalResult",
