@@ -1,5 +1,10 @@
 """Patch proposal domain boundary."""
 
+from contextforge.patch.approval import (
+    ApprovalBindingError,
+    ApprovalMethod,
+    ApprovalRecord,
+)
 from contextforge.patch.conflicts import (
     PatchConflictValidationError,
     PatchConflictValidator,
@@ -55,6 +60,9 @@ from contextforge.patch.unified import (
 )
 
 __all__ = [
+    "ApprovalBindingError",
+    "ApprovalMethod",
+    "ApprovalRecord",
     "OperationValidationPolicy",
     "PatchApprovalState",
     "PatchConflictValidationError",
