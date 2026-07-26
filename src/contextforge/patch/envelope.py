@@ -12,6 +12,8 @@ from contextforge.patch.models import PatchDiagnostic
 from contextforge.prompt import PatchPayloadFormat, ResponseContract
 from contextforge.provider import InferenceResponse
 
+MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
+
 
 @dataclass(frozen=True, slots=True)
 class ValidatedResponseEnvelope:
@@ -49,6 +51,11 @@ class ProviderResponseEnvelopeValidator:
             raise TypeError("response must be an InferenceResponse")
         if not isinstance(contract, ResponseContract):
             raise TypeError("contract must be a ResponseContract")
+        if len(response.content.encode("utf-8")) > MAX_PROVIDER_RESPONSE_BYTES:
+            _reject(
+                "PATCH_ENVELOPE_PAYLOAD_TOO_LARGE",
+                "Provider response exceeds the maximum accepted payload size.",
+            )
 
         payload = _decode_object(response.content)
         missing = tuple(field for field in contract.required_fields if field not in payload)
