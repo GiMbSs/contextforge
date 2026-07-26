@@ -22,15 +22,20 @@ from contextforge.domain import InferenceRequestId, InferenceResponseId
 from contextforge.prompt import InferenceRequest, ResponseFormat
 from contextforge.provider import (
     InferenceResponse,
+    InferenceResponseNormalizer,
+    ProviderDiagnostics,
     ProviderExecutionContext,
     ProviderExecutionMeasurements,
     ProviderFailure,
     ProviderFailureCategory,
+    ProviderFinishReason,
     ProviderFinishState,
     ProviderInvocationError,
     ProviderResponseFormat,
     ProviderResponseMetadata,
+    ProviderResponseObservation,
     ProviderUsage,
+    RawResponseRetentionPolicy,
 )
 
 OLLAMA_PROVIDER_ID = "ollama-local"
@@ -125,7 +130,7 @@ class OllamaInvocationAdapter:
             )
         try:
             payload = _json_object(response.body)
-            return self._normalize(request, execution_context, payload)
+            return self._normalize(request, execution_context, payload, response.body)
         except OllamaDiscoveryError as error:
             raise self._failure(
                 request,
@@ -140,6 +145,7 @@ class OllamaInvocationAdapter:
         request: InferenceRequest,
         execution_context: ProviderExecutionContext,
         payload: dict[str, object],
+        raw_response: bytes,
     ) -> InferenceResponse:
         message = payload.get("message")
         if not isinstance(message, dict):
@@ -149,13 +155,19 @@ class OllamaInvocationAdapter:
             raise OllamaDiscoveryError("Ollama response content is invalid.")
         tool_calls = message.get("tool_calls")
         diagnostics: list[Diagnostic] = []
-        stop_reason: str | None = None
+        provider_stop_reason = payload.get("done_reason")
+        if not isinstance(provider_stop_reason, str) or not provider_stop_reason.strip():
+            provider_stop_reason = None
         done = payload.get("done")
         finish_state = (
             ProviderFinishState.COMPLETED if done is True else ProviderFinishState.PARTIAL
         )
+        finish_reason = (
+            ProviderFinishReason.NATURAL_COMPLETION
+            if done is True
+            else ProviderFinishReason.STREAM_INTERRUPTED
+        )
         if done is not True:
-            stop_reason = "incomplete_response"
             diagnostics.append(
                 _diagnostic(
                     "PROVIDER_PARTIAL_RESPONSE",
@@ -164,7 +176,7 @@ class OllamaInvocationAdapter:
             )
         if tool_calls:
             finish_state = ProviderFinishState.PARTIAL
-            stop_reason = "unexpected_tool_call"
+            finish_reason = ProviderFinishReason.TOOL_CALL_REQUESTED
             diagnostics.append(
                 _diagnostic(
                     "PROVIDER_UNEXPECTED_TOOL_CALL",
@@ -179,13 +191,13 @@ class OllamaInvocationAdapter:
                     sort_keys=True,
                 )
 
-        return InferenceResponse(
-            _response_id(request.request_id),
-            request.request_id,
-            request.task_id,
-            content,
-            _response_format(request.response_contract.output_format),
-            ProviderResponseMetadata(
+        observation = ProviderResponseObservation(
+            response_id=_response_id(request.request_id),
+            request_id=request.request_id,
+            task_id=request.task_id,
+            content=content,
+            response_format=_response_format(request.response_contract.output_format),
+            metadata=ProviderResponseMetadata(
                 self.provider_id,
                 self.adapter_id,
                 self.adapter_version,
@@ -195,16 +207,22 @@ class OllamaInvocationAdapter:
                 self.completed_at,
                 retry_attempt=execution_context.retry_attempt,
             ),
-            _usage(payload),
-            ProviderExecutionMeasurements(
+            usage=_usage(payload),
+            measurements=ProviderExecutionMeasurements(
                 _nanoseconds_to_milliseconds(payload.get("total_duration")) or 0,
                 provider_duration_ms=_nanoseconds_to_milliseconds(payload.get("eval_duration")),
                 retry_count=execution_context.retry_attempt,
             ),
-            finish_state,
-            DiagnosticCollection(tuple(diagnostics)),
-            self.completed_at,
-            stop_reason,
+            finish_state=finish_state,
+            finish_reason=finish_reason,
+            diagnostics=ProviderDiagnostics(DiagnosticCollection(tuple(diagnostics))),
+            created_at=self.completed_at,
+            provider_stop_reason=provider_stop_reason,
+            raw_response=raw_response,
+        )
+        return InferenceResponseNormalizer().normalize(
+            observation,
+            RawResponseRetentionPolicy.NEVER,
         )
 
     def _failure(
@@ -271,9 +289,11 @@ def _json_object(body: bytes) -> dict[str, object]:
     return value
 
 
-def _usage(payload: dict[str, object]) -> ProviderUsage:
+def _usage(payload: dict[str, object]) -> ProviderUsage | None:
     input_tokens = _optional_nonnegative_int(payload.get("prompt_eval_count"))
     output_tokens = _optional_nonnegative_int(payload.get("eval_count"))
+    if input_tokens is None and output_tokens is None:
+        return None
     total_tokens = (
         input_tokens + output_tokens
         if input_tokens is not None and output_tokens is not None

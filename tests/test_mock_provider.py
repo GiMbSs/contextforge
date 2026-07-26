@@ -142,6 +142,4 @@ def test_missing_usage_data_is_not_fabricated() -> None:
         _request(), ProviderExecutionContext("execution-1")
     )
 
-    assert response.usage.input_tokens is None
-    assert response.usage.output_tokens is None
-    assert response.usage.total_tokens is None
+    assert response.usage is None

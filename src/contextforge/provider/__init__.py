@@ -28,8 +28,10 @@ from contextforge.provider.models import (
     CancellationStatus,
     InferenceResponse,
     ProviderCapabilities,
+    ProviderDiagnostics,
     ProviderExecutionContext,
     ProviderExecutionMeasurements,
+    ProviderFinishReason,
     ProviderFinishState,
     ProviderHealth,
     ProviderHealthStatus,
@@ -39,6 +41,11 @@ from contextforge.provider.models import (
     ProviderResponseFormat,
     ProviderResponseMetadata,
     ProviderUsage,
+)
+from contextforge.provider.normalization import (
+    InferenceResponseNormalizer,
+    ProviderResponseObservation,
+    RawResponseRetentionPolicy,
 )
 from contextforge.provider.ports import ProviderPort
 
@@ -52,6 +59,7 @@ __all__ = [
     "CancellationStatus",
     "DeterministicMockProvider",
     "InferenceResponse",
+    "InferenceResponseNormalizer",
     "MockProviderScenario",
     "ProviderCapabilities",
     "ProviderCapabilityProfile",
@@ -59,11 +67,13 @@ __all__ = [
     "ProviderDeliveryDecision",
     "ProviderDeliveryPolicy",
     "ProviderDeliveryPolicyEvaluator",
+    "ProviderDiagnostics",
     "ProviderExecutionContext",
     "ProviderExecutionMeasurements",
     "ProviderExecutionMode",
     "ProviderFailure",
     "ProviderFailureCategory",
+    "ProviderFinishReason",
     "ProviderFinishState",
     "ProviderHealth",
     "ProviderHealthStatus",
@@ -75,5 +85,7 @@ __all__ = [
     "ProviderRequestFeature",
     "ProviderResponseFormat",
     "ProviderResponseMetadata",
+    "ProviderResponseObservation",
     "ProviderUsage",
+    "RawResponseRetentionPolicy",
 ]

@@ -18,8 +18,10 @@ from contextforge.provider import (
     CancellationStatus,
     InferenceResponse,
     ProviderCapabilities,
+    ProviderDiagnostics,
     ProviderExecutionContext,
     ProviderExecutionMeasurements,
+    ProviderFinishReason,
     ProviderFinishState,
     ProviderHealth,
     ProviderHealthStatus,
@@ -99,8 +101,9 @@ def test_inference_response_is_immutable_and_preserves_correlation() -> None:
         ProviderUsage(10, 5, 15),
         ProviderExecutionMeasurements(25),
         ProviderFinishState.COMPLETED,
-        DiagnosticCollection(),
+        ProviderDiagnostics(DiagnosticCollection()),
         NOW,
+        ProviderFinishReason.NATURAL_COMPLETION,
     )
 
     assert response.request_id == request_id
@@ -109,8 +112,8 @@ def test_inference_response_is_immutable_and_preserves_correlation() -> None:
         response.content = "changed"  # type: ignore[misc]
 
 
-def test_partial_response_requires_an_explicit_stop_reason() -> None:
-    with pytest.raises(ValueError, match="stop_reason"):
+def test_partial_response_requires_an_incomplete_finish_reason() -> None:
+    with pytest.raises(ValueError, match="incomplete finish reason"):
         InferenceResponse(
             new_inference_response_id(),
             new_inference_request_id(),
@@ -129,8 +132,9 @@ def test_partial_response_requires_an_explicit_stop_reason() -> None:
             ProviderUsage(),
             ProviderExecutionMeasurements(1),
             ProviderFinishState.PARTIAL,
-            DiagnosticCollection(),
+            ProviderDiagnostics(DiagnosticCollection()),
             NOW,
+            ProviderFinishReason.UNKNOWN,
         )
 
 

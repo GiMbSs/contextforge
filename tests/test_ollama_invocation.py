@@ -29,6 +29,7 @@ from contextforge.prompt import (
 )
 from contextforge.provider import (
     ProviderExecutionContext,
+    ProviderFinishReason,
     ProviderFinishState,
     ProviderInvocationError,
 )
@@ -160,7 +161,7 @@ def test_unexpected_tool_calls_are_not_executed() -> None:
     )
 
     assert response.finish_state is ProviderFinishState.PARTIAL
-    assert response.stop_reason == "unexpected_tool_call"
+    assert response.finish_reason is ProviderFinishReason.TOOL_CALL_REQUESTED
     assert "untrusted_tool_calls" in response.content
     assert "danger" in response.content
     assert len(transport.requests) == 1
@@ -174,9 +175,7 @@ def test_missing_usage_remains_unavailable() -> None:
         ProviderExecutionContext("execution-1"),
     )
 
-    assert response.usage.input_tokens is None
-    assert response.usage.output_tokens is None
-    assert response.usage.total_tokens is None
+    assert response.usage is None
 
 
 def test_malformed_response_becomes_sanitized_normalized_failure() -> None:

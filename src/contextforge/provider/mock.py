@@ -28,8 +28,10 @@ from contextforge.provider.models import (
     CancellationResult,
     CancellationStatus,
     InferenceResponse,
+    ProviderDiagnostics,
     ProviderExecutionContext,
     ProviderExecutionMeasurements,
+    ProviderFinishReason,
     ProviderFinishState,
     ProviderHealth,
     ProviderHealthStatus,
@@ -37,6 +39,11 @@ from contextforge.provider.models import (
     ProviderResponseFormat,
     ProviderResponseMetadata,
     ProviderUsage,
+)
+from contextforge.provider.normalization import (
+    InferenceResponseNormalizer,
+    ProviderResponseObservation,
+    RawResponseRetentionPolicy,
 )
 
 MOCK_PROVIDER_ID = "mock-provider"
@@ -182,19 +189,19 @@ class DeterministicMockProvider:
         ):
             raise ProviderInvocationError(self._failure(request))
 
-        content, response_format, finish_state, diagnostics, stop_reason = self._response_data()
+        content, response_format, finish_state, diagnostics, finish_reason = self._response_data()
         usage = (
-            ProviderUsage()
+            None
             if self.scenario is MockProviderScenario.MISSING_USAGE_DATA
             else ProviderUsage(100, 50, 150, values_are_estimates=False)
         )
-        return InferenceResponse(
-            _response_id(request.request_id),
-            request.request_id,
-            request.task_id,
-            content,
-            response_format,
-            ProviderResponseMetadata(
+        observation = ProviderResponseObservation(
+            response_id=_response_id(request.request_id),
+            request_id=request.request_id,
+            task_id=request.task_id,
+            content=content,
+            response_format=response_format,
+            metadata=ProviderResponseMetadata(
                 MOCK_PROVIDER_ID,
                 MOCK_ADAPTER_ID,
                 MOCK_ADAPTER_VERSION,
@@ -205,12 +212,17 @@ class DeterministicMockProvider:
                 provider_request_id=f"mock-{request.request_id}",
                 retry_attempt=execution_context.retry_attempt,
             ),
-            usage,
-            ProviderExecutionMeasurements(0, 0, 0, execution_context.retry_attempt),
-            finish_state,
-            diagnostics,
-            self.timestamp,
-            stop_reason,
+            usage=usage,
+            measurements=ProviderExecutionMeasurements(0, 0, 0, execution_context.retry_attempt),
+            finish_state=finish_state,
+            finish_reason=finish_reason,
+            diagnostics=ProviderDiagnostics(diagnostics),
+            created_at=self.timestamp,
+            raw_response=content.encode(),
+        )
+        return InferenceResponseNormalizer().normalize(
+            observation,
+            RawResponseRetentionPolicy.NEVER,
         )
 
     def cancel(self, request_id: InferenceRequestId) -> CancellationResult:
@@ -265,7 +277,7 @@ class DeterministicMockProvider:
         ProviderResponseFormat,
         ProviderFinishState,
         DiagnosticCollection,
-        str | None,
+        ProviderFinishReason,
     ]:
         if self.scenario is MockProviderScenario.SUCCESSFUL_ANALYSIS:
             return (
@@ -284,7 +296,7 @@ class DeterministicMockProvider:
                 ProviderResponseFormat.ANALYSIS_ENVELOPE,
                 ProviderFinishState.COMPLETED,
                 DiagnosticCollection(),
-                None,
+                ProviderFinishReason.NATURAL_COMPLETION,
             )
         if self.scenario is MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH:
             return (
@@ -304,7 +316,7 @@ class DeterministicMockProvider:
                 ProviderResponseFormat.PATCH_ENVELOPE,
                 ProviderFinishState.COMPLETED,
                 DiagnosticCollection(),
-                None,
+                ProviderFinishReason.NATURAL_COMPLETION,
             )
         if self.scenario is MockProviderScenario.MALFORMED_RESPONSE:
             return (
@@ -312,7 +324,7 @@ class DeterministicMockProvider:
                 ProviderResponseFormat.JSON_TEXT,
                 ProviderFinishState.COMPLETED,
                 DiagnosticCollection(),
-                None,
+                ProviderFinishReason.NATURAL_COMPLETION,
             )
         if self.scenario is MockProviderScenario.CANCELLATION:
             return (
@@ -320,7 +332,7 @@ class DeterministicMockProvider:
                 ProviderResponseFormat.UNKNOWN,
                 ProviderFinishState.CANCELLED,
                 DiagnosticCollection((_diagnostic("PROVIDER_CANCELLED", "Invocation cancelled."),)),
-                "client_cancellation",
+                ProviderFinishReason.CLIENT_CANCELLATION,
             )
         if self.scenario is MockProviderScenario.PARTIAL_STREAM:
             return (
@@ -330,7 +342,7 @@ class DeterministicMockProvider:
                 DiagnosticCollection(
                     (_diagnostic("PROVIDER_STREAM_INTERRUPTED", "Mock stream interrupted."),)
                 ),
-                "stream_interrupted",
+                ProviderFinishReason.STREAM_INTERRUPTED,
             )
         if self.scenario is MockProviderScenario.UNEXPECTED_TOOL_CALL:
             return (
@@ -345,7 +357,7 @@ class DeterministicMockProvider:
                         ),
                     )
                 ),
-                "unexpected_tool_call",
+                ProviderFinishReason.TOOL_CALL_REQUESTED,
             )
         return (
             '{"summary":"usage unavailable"}',
@@ -354,7 +366,7 @@ class DeterministicMockProvider:
             DiagnosticCollection(
                 (_diagnostic("PROVIDER_USAGE_UNAVAILABLE", "Usage data is unavailable."),)
             ),
-            None,
+            ProviderFinishReason.NATURAL_COMPLETION,
         )
 
 

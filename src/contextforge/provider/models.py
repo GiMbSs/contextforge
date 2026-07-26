@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
-from contextforge.diagnostics import DiagnosticCollection
+from contextforge.diagnostics import Diagnostic, DiagnosticCollection
 from contextforge.domain import (
     InferenceRequestId,
     InferenceResponseId,
@@ -152,6 +153,44 @@ class ProviderFinishState(StrEnum):
     FAILED = "failed"
 
 
+class ProviderFinishReason(StrEnum):
+    """Provider-independent explanation for an invocation ending."""
+
+    NATURAL_COMPLETION = "natural_completion"
+    OUTPUT_LIMIT_REACHED = "output_limit_reached"
+    STOP_SEQUENCE = "stop_sequence"
+    CONTENT_FILTER = "content_filter"
+    TOOL_CALL_REQUESTED = "tool_call_requested"
+    PROVIDER_CANCELLATION = "provider_cancellation"
+    CLIENT_CANCELLATION = "client_cancellation"
+    TIMEOUT = "timeout"
+    PROVIDER_ERROR = "provider_error"
+    MALFORMED_OUTPUT = "malformed_output"
+    STREAM_INTERRUPTED = "stream_interrupted"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDiagnostics:
+    """Normalized immutable diagnostics associated with provider output."""
+
+    collection: DiagnosticCollection = field(default_factory=DiagnosticCollection)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.collection, DiagnosticCollection):
+            raise TypeError("collection must be a DiagnosticCollection")
+
+    def __iter__(self) -> Iterator[Diagnostic]:
+        return iter(self.collection)
+
+    def __len__(self) -> int:
+        return len(self.collection)
+
+    def with_diagnostic(self, diagnostic: Diagnostic) -> ProviderDiagnostics:
+        """Return diagnostics with one additional normalized item."""
+        return ProviderDiagnostics(self.collection.with_diagnostic(diagnostic))
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderUsage:
     """Usage values reported by a provider; absent means unknown."""
@@ -252,12 +291,14 @@ class InferenceResponse:
     content: str
     response_format: ProviderResponseFormat
     metadata: ProviderResponseMetadata
-    usage: ProviderUsage
+    usage: ProviderUsage | None
     measurements: ProviderExecutionMeasurements
     finish_state: ProviderFinishState
-    diagnostics: DiagnosticCollection
+    diagnostics: ProviderDiagnostics
     created_at: datetime
-    stop_reason: str | None = None
+    finish_reason: ProviderFinishReason = ProviderFinishReason.UNKNOWN
+    provider_stop_reason: str | None = None
+    raw_response: bytes | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.response_id, InferenceResponseId):
@@ -272,19 +313,36 @@ class InferenceResponse:
             raise TypeError("response_format must be a ProviderResponseFormat")
         if not isinstance(self.metadata, ProviderResponseMetadata):
             raise TypeError("metadata must be ProviderResponseMetadata")
-        if not isinstance(self.usage, ProviderUsage):
-            raise TypeError("usage must be ProviderUsage")
+        if self.usage is not None and not isinstance(self.usage, ProviderUsage):
+            raise TypeError("usage must be ProviderUsage or None")
         if not isinstance(self.measurements, ProviderExecutionMeasurements):
             raise TypeError("measurements must be ProviderExecutionMeasurements")
         if not isinstance(self.finish_state, ProviderFinishState):
             raise TypeError("finish_state must be a ProviderFinishState")
-        if not isinstance(self.diagnostics, DiagnosticCollection):
-            raise TypeError("diagnostics must be a DiagnosticCollection")
+        if not isinstance(self.diagnostics, ProviderDiagnostics):
+            raise TypeError("diagnostics must be ProviderDiagnostics")
         _require_aware(self.created_at, "created_at")
-        if self.stop_reason is not None:
-            _require_text(self.stop_reason, "stop_reason")
-        if self.finish_state is ProviderFinishState.PARTIAL and not self.stop_reason:
-            raise ValueError("Partial responses require a stop_reason")
+        if not isinstance(self.finish_reason, ProviderFinishReason):
+            raise TypeError("finish_reason must be a ProviderFinishReason")
+        if self.provider_stop_reason is not None:
+            _require_text(self.provider_stop_reason, "provider_stop_reason")
+        if self.raw_response is not None and not isinstance(self.raw_response, bytes):
+            raise TypeError("raw_response must be bytes")
+        if self.finish_state is ProviderFinishState.PARTIAL and self.finish_reason in (
+            ProviderFinishReason.NATURAL_COMPLETION,
+            ProviderFinishReason.UNKNOWN,
+        ):
+            raise ValueError("Partial responses require an incomplete finish reason")
+        if self.finish_state is ProviderFinishState.CANCELLED and self.finish_reason not in (
+            ProviderFinishReason.CLIENT_CANCELLATION,
+            ProviderFinishReason.PROVIDER_CANCELLATION,
+        ):
+            raise ValueError("Cancelled responses require a cancellation finish reason")
+        if (
+            self.finish_state is ProviderFinishState.TIMED_OUT
+            and self.finish_reason is not ProviderFinishReason.TIMEOUT
+        ):
+            raise ValueError("Timed-out responses require the timeout finish reason")
 
 
 class CancellationStatus(StrEnum):
