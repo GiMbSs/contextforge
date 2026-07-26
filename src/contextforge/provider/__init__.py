@@ -5,6 +5,12 @@ from contextforge.provider.capabilities import (
     ProviderExecutionMode,
     ProviderRequestFeature,
 )
+from contextforge.provider.delivery import (
+    ProviderDeliveryAuthorization,
+    ProviderDeliveryDecision,
+    ProviderDeliveryPolicy,
+    ProviderDeliveryPolicyEvaluator,
+)
 from contextforge.provider.mock import (
     MOCK_ADAPTER_ID,
     MOCK_ADAPTER_VERSION,
@@ -49,6 +55,10 @@ __all__ = [
     "MockProviderScenario",
     "ProviderCapabilities",
     "ProviderCapabilityProfile",
+    "ProviderDeliveryAuthorization",
+    "ProviderDeliveryDecision",
+    "ProviderDeliveryPolicy",
+    "ProviderDeliveryPolicyEvaluator",
     "ProviderExecutionContext",
     "ProviderExecutionMeasurements",
     "ProviderExecutionMode",
