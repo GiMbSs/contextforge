@@ -10,6 +10,10 @@ from contextforge.patch.envelope import (
     ResponseEnvelopeValidationError,
     ValidatedResponseEnvelope,
 )
+from contextforge.patch.lifecycle import (
+    PatchProposalLifecycle,
+    ProposalLifecycleState,
+)
 from contextforge.patch.models import (
     PatchApprovalState,
     PatchDiagnostic,
@@ -63,12 +67,14 @@ __all__ = [
     "PatchPathValidationError",
     "PatchPathValidator",
     "PatchProposal",
+    "PatchProposalLifecycle",
     "PatchProposalMaterialization",
     "PatchProposalMaterializer",
     "PatchSourceArtifact",
     "PatchSourceState",
     "PatchValidationState",
     "PatchValidationSummary",
+    "ProposalLifecycleState",
     "ProposedChange",
     "ProtectedPathPolicy",
     "ProviderResponseEnvelopeValidator",
