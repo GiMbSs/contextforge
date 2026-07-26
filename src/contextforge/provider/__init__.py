@@ -5,6 +5,18 @@ from contextforge.provider.capabilities import (
     ProviderExecutionMode,
     ProviderRequestFeature,
 )
+from contextforge.provider.mock import (
+    MOCK_ADAPTER_ID,
+    MOCK_ADAPTER_VERSION,
+    MOCK_CAPABILITY_PROFILE_ID,
+    MOCK_MODEL_ID,
+    MOCK_PROVIDER_ID,
+    DeterministicMockProvider,
+    MockProviderScenario,
+    ProviderFailure,
+    ProviderFailureCategory,
+    ProviderInvocationError,
+)
 from contextforge.provider.models import (
     CancellationResult,
     CancellationStatus,
@@ -25,17 +37,27 @@ from contextforge.provider.models import (
 from contextforge.provider.ports import ProviderPort
 
 __all__ = [
+    "MOCK_ADAPTER_ID",
+    "MOCK_ADAPTER_VERSION",
+    "MOCK_CAPABILITY_PROFILE_ID",
+    "MOCK_MODEL_ID",
+    "MOCK_PROVIDER_ID",
     "CancellationResult",
     "CancellationStatus",
+    "DeterministicMockProvider",
     "InferenceResponse",
+    "MockProviderScenario",
     "ProviderCapabilities",
     "ProviderCapabilityProfile",
     "ProviderExecutionContext",
     "ProviderExecutionMeasurements",
     "ProviderExecutionMode",
+    "ProviderFailure",
+    "ProviderFailureCategory",
     "ProviderFinishState",
     "ProviderHealth",
     "ProviderHealthStatus",
+    "ProviderInvocationError",
     "ProviderModel",
     "ProviderOperation",
     "ProviderOperationNotSupportedError",
