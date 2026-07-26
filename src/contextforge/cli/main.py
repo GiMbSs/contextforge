@@ -25,6 +25,8 @@ context_app = typer.Typer(help="Inspect persisted Context Bundles.")
 app.add_typer(context_app, name="context")
 prompt_app = typer.Typer(help="Inspect safe persisted prompt representations.")
 app.add_typer(prompt_app, name="prompt")
+provider_app = typer.Typer(help="Inspect configured inference providers.")
+app.add_typer(provider_app, name="provider")
 
 
 def _version_callback(value: bool) -> None:
@@ -304,6 +306,58 @@ def prompt_export(
 ) -> None:
     """Export the latest safe persisted prompt representation."""
     _inspect_prompt(ctx, "export", destination=destination)
+
+
+def _inspect_provider(
+    ctx: typer.Context,
+    operation: str,
+    provider_id: str | None = None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    selected_id = provider_id or options.provider
+    result = _gateway.inspect_provider(operation, selected_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@provider_app.command("list")
+def provider_list(ctx: typer.Context) -> None:
+    """List configured providers and their capability summaries."""
+    _inspect_provider(ctx, "list")
+
+
+@provider_app.command("show")
+def provider_show(
+    ctx: typer.Context,
+    provider_id: Annotated[str, typer.Argument(help="Configured provider identifier.")],
+) -> None:
+    """Show one provider configuration without credentials."""
+    _inspect_provider(ctx, "show", provider_id)
+
+
+@provider_app.command("health")
+def provider_health(
+    ctx: typer.Context,
+    provider_id: Annotated[
+        str | None,
+        typer.Argument(help="Configured provider identifier."),
+    ] = None,
+) -> None:
+    """Check provider health without transmitting project content."""
+    _inspect_provider(ctx, "health", provider_id)
+
+
+@provider_app.command("models")
+def provider_models(
+    ctx: typer.Context,
+    provider_id: Annotated[
+        str | None,
+        typer.Argument(help="Configured provider identifier."),
+    ] = None,
+) -> None:
+    """List available models without downloading any model."""
+    _inspect_provider(ctx, "models", provider_id)
 
 
 def main() -> None:

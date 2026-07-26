@@ -50,9 +50,11 @@ from contextforge.indexer import (
 from contextforge.project import ProjectRoot, resolve_project_root
 from contextforge.prompt import InferenceRequest
 from contextforge.provider import (
+    MOCK_MODEL_ID,
+    MOCK_PROVIDER_ID,
     DeterministicMockProvider,
     MockProviderScenario,
-    ProviderPort,
+    ProviderCapabilityProfile,
 )
 from contextforge.retrieval import (
     ContextBudget,
@@ -117,6 +119,12 @@ class ProjectCommandGateway(Protocol):
         operation: str,
         *,
         destination: Path | None = None,
+    ) -> CliCommandResult: ...
+
+    def inspect_provider(
+        self,
+        operation: str,
+        provider_id: str | None = None,
     ) -> CliCommandResult: ...
 
 
@@ -399,6 +407,87 @@ class LocalProjectCommandGateway:
             )
         return _prompt_failure("CLI_PROMPT_OPERATION_INVALID", "Unknown prompt operation.")
 
+    def inspect_provider(
+        self,
+        operation: str,
+        provider_id: str | None = None,
+    ) -> CliCommandResult:
+        registry = _MockProviders()
+        if operation == "list":
+            providers = tuple(
+                _provider_summary(registry.get(configured_id))
+                for configured_id in registry.provider_ids()
+            )
+            return CliCommandResult(
+                {
+                    "command": "provider list",
+                    "providers": providers,
+                    "status": "available",
+                }
+            )
+        selected_id = provider_id or MOCK_PROVIDER_ID
+        provider = registry.get(selected_id)
+        if provider is None:
+            return _provider_failure(
+                "CLI_PROVIDER_NOT_FOUND",
+                f"Provider '{selected_id}' is not configured.",
+            )
+        if operation == "show":
+            capabilities = provider.get_capabilities()
+            return CliCommandResult(
+                {
+                    "capabilities": _provider_capabilities(capabilities),
+                    "command": "provider show",
+                    "configuration": {
+                        "credentials_exposed": False,
+                        "default_model": MOCK_MODEL_ID,
+                        "endpoint": None,
+                        "provider_id": selected_id,
+                    },
+                    "delivery_policy_status": (
+                        "local_only"
+                        if capabilities.execution_mode.value == "local"
+                        else "authorization_required"
+                    ),
+                    "status": "available",
+                }
+            )
+        if operation == "health":
+            health = provider.health_check()
+            return CliCommandResult(
+                {
+                    "checked_at": health.checked_at.isoformat(),
+                    "command": "provider health",
+                    "health": health.status.value,
+                    "message": health.message,
+                    "project_content_transmitted": False,
+                    "provider_id": selected_id,
+                    "status": "available",
+                }
+            )
+        if operation == "models":
+            models = provider.list_models()
+            return CliCommandResult(
+                {
+                    "command": "provider models",
+                    "download_triggered": False,
+                    "models": [
+                        {
+                            "display_name": model.display_name,
+                            "metadata": dict(model.metadata),
+                            "model_id": model.model_id,
+                        }
+                        for model in models
+                    ],
+                    "provider_id": selected_id,
+                    "status": "available",
+                }
+            )
+        return _provider_failure(
+            "CLI_PROVIDER_OPERATION_INVALID",
+            "Unknown provider operation.",
+        )
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -513,8 +602,12 @@ class _EmptyContextBuilder:
 
 
 class _MockProviders:
-    def get(self, provider_id: str) -> ProviderPort | None:
-        if provider_id != "mock-provider":
+    @staticmethod
+    def provider_ids() -> tuple[str, ...]:
+        return (MOCK_PROVIDER_ID,)
+
+    def get(self, provider_id: str) -> DeterministicMockProvider | None:
+        if provider_id != MOCK_PROVIDER_ID:
             return None
         return DeterministicMockProvider(
             MockProviderScenario.SUCCESSFUL_ANALYSIS,
@@ -692,6 +785,65 @@ def _prompt_failure(code: str, message: str) -> CliCommandResult:
         (
             {
                 "capability": "prompt_inspection",
+                "code": code,
+                "message": message,
+            },
+        ),
+    )
+
+
+def _provider_capabilities(
+    capabilities: ProviderCapabilityProfile,
+) -> dict[str, object]:
+    return {
+        "adapter_id": capabilities.adapter_id,
+        "adapter_version": capabilities.adapter_version,
+        "cancellation_supported": capabilities.cancellation_supported,
+        "context_limit_tokens": capabilities.context_limit_tokens,
+        "execution_mode": capabilities.execution_mode.value,
+        "health_check_supported": capabilities.health_check_supported,
+        "maximum_output_tokens": capabilities.maximum_output_tokens,
+        "model_discovery_supported": capabilities.model_discovery_supported,
+        "multiple_messages_supported": capabilities.multiple_messages_supported,
+        "profile_id": capabilities.profile_id,
+        "provider_id": capabilities.provider_id,
+        "streaming_supported": capabilities.streaming_supported,
+        "structured_output_supported": capabilities.structured_output_supported,
+        "supported_request_features": [
+            feature.value for feature in capabilities.supported_request_features
+        ],
+        "supported_response_formats": [
+            response_format.value for response_format in capabilities.supported_response_formats
+        ],
+        "usage_reporting_supported": capabilities.usage_reporting_supported,
+    }
+
+
+def _provider_summary(
+    provider: DeterministicMockProvider | None,
+) -> dict[str, object]:
+    if provider is None:
+        raise RuntimeError("Configured provider registry is inconsistent")
+    capabilities = provider.get_capabilities()
+    health = provider.health_check()
+    return {
+        "adapter_id": capabilities.adapter_id,
+        "context_limit_tokens": capabilities.context_limit_tokens,
+        "default_model": MOCK_MODEL_ID,
+        "execution_mode": capabilities.execution_mode.value,
+        "health": health.status.value,
+        "provider_id": capabilities.provider_id,
+        "structured_output_supported": capabilities.structured_output_supported,
+    }
+
+
+def _provider_failure(code: str, message: str) -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "provider_inspection",
                 "code": code,
                 "message": message,
             },
