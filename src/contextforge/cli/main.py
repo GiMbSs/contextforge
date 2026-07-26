@@ -438,6 +438,102 @@ def patch_export(
     )
 
 
+def _authorize_patch(
+    ctx: typer.Context,
+    operation: str,
+    proposal_id: str,
+    *,
+    reason: str | None = None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    if options.non_interactive:
+        typer.echo(
+            "CLI_PATCH_INTERACTIVE_REQUIRED: Interactive confirmation is required.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+
+    review_result = _gateway.inspect_patch(root, "review", proposal_id=proposal_id)
+    if review_result.exit_code is not CliExitCode.SUCCESS:
+        render_result(review_result, output_format=options.output_format)
+        raise typer.Exit(int(review_result.exit_code))
+    review = review_result.data["review"]
+    if not isinstance(review, dict):
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+    warnings = review.get("warnings", [])
+    operation_counts = review.get("operation_counts", {})
+    typer.echo(f"Proposal: {proposal_id}")
+    typer.echo(f"Project fingerprint: {review.get('project_fingerprint')}")
+    typer.echo(f"Affected files: {len(review.get('affected_files', []))}")
+    typer.echo(f"Operations: {operation_counts}")
+    typer.echo(f"Warnings: {len(warnings)}")
+
+    if operation == "approve":
+        high_risk = any(
+            isinstance(warning, dict) and "PROTECTED" in str(warning.get("code", ""))
+            for warning in warnings
+        ) or (
+            isinstance(operation_counts, dict)
+            and (
+                int(operation_counts.get("delete", 0)) > 0
+                or int(operation_counts.get("rename", 0)) > 0
+            )
+        )
+        if high_risk:
+            confirmation = typer.prompt(
+                "High-risk proposal. Type the proposal identifier to approve"
+            )
+            confirmed = confirmation == proposal_id
+        else:
+            confirmed = typer.confirm("Approve this exact proposal?")
+    else:
+        confirmed = typer.confirm("Reject this exact proposal?")
+    if not confirmed:
+        typer.echo(
+            "CLI_PATCH_CONFIRMATION_DECLINED: Proposal state was not changed.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+
+    result = _gateway.authorize_patch(
+        root,
+        operation,
+        proposal_id,
+        reason=reason,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@patch_app.command("approve")
+def patch_approve(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument(help="Exact proposal identifier.")],
+) -> None:
+    """Interactively approve one exact persisted proposal."""
+    _authorize_patch(ctx, "approve", proposal_id)
+
+
+@patch_app.command("reject")
+def patch_reject(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument(help="Exact proposal identifier.")],
+    reason: Annotated[
+        str | None,
+        typer.Option("--reason", help="Auditable rejection reason."),
+    ] = None,
+) -> None:
+    """Interactively reject one exact persisted proposal."""
+    _authorize_patch(ctx, "reject", proposal_id, reason=reason)
+
+
 def main() -> None:
     """Run the ContextForge CLI adapter."""
     app()

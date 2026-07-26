@@ -13,6 +13,7 @@ from contextforge.application import (
     PatchApprovalApplicationPipeline,
     PatchApprovalBindingError,
     PatchApprovalNotFoundError,
+    RejectPatchProposal,
     StaleProjectStateError,
 )
 from contextforge.domain import (
@@ -83,6 +84,7 @@ class MemoryStorage:
         self.approvals = {}
         self.application_results = []
         self.events = []
+        self.rejections = []
 
     def load_proposal(self, proposal_id):
         return self.proposal if proposal_id == self.proposal.proposal_id else None
@@ -97,6 +99,10 @@ class MemoryStorage:
     def save_approval(self, approval):
         self.approvals[approval.approval_id] = approval
         self.events.append("approval")
+
+    def save_rejection(self, proposal_id, reason, rejected_at):
+        self.rejections.append((proposal_id, reason, rejected_at))
+        self.events.append("rejection")
 
     def load_approval(self, approval_id):
         return self.approvals.get(approval_id)
@@ -172,6 +178,20 @@ def test_approval_is_explicitly_recorded_before_application() -> None:
         "application-result",
         "lifecycle:applied",
     ]
+
+
+def test_rejection_records_reason_and_terminal_lifecycle() -> None:
+    pipeline, storage, application, proposal = _pipeline()
+
+    rejected = pipeline.reject(
+        RejectPatchProposal(proposal.proposal_id, "Requires a narrower patch.")
+    )
+
+    assert rejected.lifecycle.state is ProposalLifecycleState.REJECTED
+    assert rejected.reason == "Requires a narrower patch."
+    assert storage.rejections == [(proposal.proposal_id, "Requires a narrower patch.", NOW)]
+    assert storage.events == ["rejection", "lifecycle:rejected"]
+    assert application.calls == []
 
 
 def test_apply_does_not_infer_approval_from_application_intent() -> None:

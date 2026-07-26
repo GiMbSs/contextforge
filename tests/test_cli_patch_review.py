@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
+from contextforge.adapters.project_commands import LocalProjectCommandGateway
 from contextforge.cli.main import app
 from contextforge.diagnostics import DiagnosticCode, DiagnosticSeverity
 from contextforge.domain import (
@@ -35,12 +36,17 @@ NOW = datetime(2026, 7, 26, tzinfo=UTC)
 
 
 def _persist_proposal(project: Path) -> str:
+    (project / ".contextforge").mkdir()
+    root = ProjectRoot(project.resolve(), ProjectRootSource.EXPLICIT)
+    project_fingerprint = ProjectFingerprint(
+        str(LocalProjectCommandGateway().scan(root).data["project_fingerprint"])
+    )
     proposal = PatchProposal(
         new_patch_proposal_id(),
         new_task_id(),
         new_inference_request_id(),
         new_inference_response_id(),
-        ProjectFingerprint("project_sha256_" + "a" * 64),
+        project_fingerprint,
         (
             ProposedChange(
                 "change-1",
@@ -91,9 +97,7 @@ def _persist_proposal(project: Path) -> str:
             proposal_fingerprint=fingerprint,
         )
     )
-    LocalPatchProposalStorage(ProjectRoot(project.resolve(), ProjectRootSource.EXPLICIT)).save(
-        proposal, lifecycle
-    )
+    LocalPatchProposalStorage(root).save(proposal, lifecycle)
     return str(proposal.proposal_id)
 
 
@@ -193,3 +197,86 @@ def test_patch_show_reports_missing_proposal(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert json.loads(result.stdout) == {"status": "failed"}
     assert "CLI_PATCH_PROPOSAL_NOT_FOUND" in result.stderr
+
+
+def test_patch_approve_requires_exact_typed_confirmation_for_high_risk(
+    tmp_path: Path,
+) -> None:
+    proposal_id = _persist_proposal(tmp_path)
+
+    declined = runner.invoke(
+        app,
+        ["--project", str(tmp_path), "patch", "approve", proposal_id],
+        input="wrong-proposal\n",
+    )
+    approved = runner.invoke(
+        app,
+        ["--project", str(tmp_path), "patch", "approve", proposal_id],
+        input=f"{proposal_id}\n",
+    )
+
+    assert declined.exit_code == 1
+    assert "CLI_PATCH_CONFIRMATION_DECLINED" in declined.stderr
+    assert approved.exit_code == 0, (
+        approved.stdout,
+        approved.stderr,
+        approved.exception,
+    )
+    record = LocalPatchProposalStorage(
+        ProjectRoot(tmp_path.resolve(), ProjectRootSource.EXPLICIT)
+    ).load_record(proposal_id)
+    assert record is not None
+    lifecycle = record["lifecycle"]
+    assert isinstance(lifecycle, dict)
+    assert lifecycle["state"] == "approved"
+    approvals = tuple((tmp_path / ".contextforge" / "approvals").glob("*.json"))
+    assert len(approvals) == 1
+
+
+def test_patch_reject_persists_reason_without_applying_files(tmp_path: Path) -> None:
+    proposal_id = _persist_proposal(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "patch",
+            "reject",
+            proposal_id,
+            "--reason",
+            "Needs a smaller change.",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0
+    record = LocalPatchProposalStorage(
+        ProjectRoot(tmp_path.resolve(), ProjectRootSource.EXPLICIT)
+    ).load_record(proposal_id)
+    assert record is not None
+    lifecycle = record["lifecycle"]
+    rejection = record["rejection"]
+    assert isinstance(lifecycle, dict)
+    assert isinstance(rejection, dict)
+    assert lifecycle["state"] == "rejected"
+    assert rejection["reason"] == "Needs a smaller change."
+
+
+def test_patch_approval_refuses_non_interactive_mode(tmp_path: Path) -> None:
+    proposal_id = _persist_proposal(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "CLI_PATCH_INTERACTIVE_REQUIRED" in result.stderr

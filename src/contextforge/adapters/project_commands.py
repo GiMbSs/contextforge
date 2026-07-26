@@ -20,9 +20,17 @@ from contextforge.adapters.filesystem import (
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
 from contextforge.application import (
     AnalysisExecutionPipeline,
+    ApprovePatchProposal,
     ExecuteTask,
     InitializeProject,
+    PatchApplicationPreview,
+    PatchApplicationResult,
+    PatchApprovalApplicationPipeline,
+    PatchProposalNotFoundError,
+    PatchWorkflowStateError,
     ProjectInitialization,
+    RejectPatchProposal,
+    StaleProjectStateError,
 )
 from contextforge.configuration import ScannerConfig
 from contextforge.context import (
@@ -35,7 +43,10 @@ from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
     IndexId,
     InventoryId,
+    PatchProposalId,
+    ProjectFingerprint,
     ProjectId,
+    ProposalFingerprint,
     RequestedOutput,
     TaskKind,
     TaskSpecification,
@@ -48,6 +59,7 @@ from contextforge.indexer import (
     IndexRequest,
     ProjectIndex,
 )
+from contextforge.patch import ApprovalMethod, ApprovalRecord, PatchProposal
 from contextforge.project import ProjectRoot, resolve_project_root
 from contextforge.prompt import InferenceRequest
 from contextforge.provider import (
@@ -137,6 +149,15 @@ class ProjectCommandGateway(Protocol):
         destination: Path | None = None,
     ) -> CliCommandResult: ...
 
+    def authorize_patch(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        proposal_id: str,
+        *,
+        reason: str | None = None,
+    ) -> CliCommandResult: ...
+
 
 @dataclass(slots=True)
 class _LocalSource:
@@ -153,7 +174,9 @@ class LocalProjectCommandGateway:
     """Default local composition of existing application and adapter services."""
 
     scanner: LocalProjectScanner = field(default_factory=LocalProjectScanner)
-    scanner_configuration: ScannerConfig = field(default_factory=ScannerConfig)
+    scanner_configuration: ScannerConfig = field(
+        default_factory=lambda: ScannerConfig(exclude_patterns=(".contextforge/",))
+    )
 
     def initialize(self, root: ProjectRoot) -> CliCommandResult:
         result = ProjectInitialization(LocalProjectInitialization()).execute(
@@ -557,6 +580,86 @@ class LocalProjectCommandGateway:
             "Unknown patch inspection operation.",
         )
 
+    def authorize_patch(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        proposal_id: str,
+        *,
+        reason: str | None = None,
+    ) -> CliCommandResult:
+        try:
+            selected_id = PatchProposalId(proposal_id)
+        except (TypeError, ValueError):
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        storage = LocalPatchProposalStorage(root)
+        proposal = storage.load_proposal(selected_id)
+        if proposal is None:
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        current_fingerprint = self._scan(root).project_fingerprint
+        pipeline = PatchApprovalApplicationPipeline(
+            storage=storage,
+            project_state=_FixedProjectState(current_fingerprint),
+            application=_UnavailablePatchApplication(),
+        )
+        try:
+            if operation == "approve":
+                warning_codes = tuple(
+                    str(diagnostic.code)
+                    for diagnostic in proposal.validation.diagnostics
+                    if diagnostic.severity.value in ("warning", "error", "critical")
+                )
+                approved = pipeline.approve(
+                    ApprovePatchProposal(
+                        selected_id,
+                        ApprovalMethod.INTERACTIVE,
+                        acknowledged_warnings=warning_codes,
+                    )
+                )
+                return CliCommandResult(
+                    {
+                        "approval_id": str(approved.approval.approval_id),
+                        "command": "patch approve",
+                        "lifecycle_state": approved.lifecycle.state.value,
+                        "project_fingerprint": str(approved.approval.project_fingerprint),
+                        "proposal_fingerprint": str(approved.approval.proposal_fingerprint),
+                        "proposal_id": proposal_id,
+                        "status": "approved",
+                    }
+                )
+            if operation == "reject":
+                rejected = pipeline.reject(
+                    RejectPatchProposal(
+                        selected_id,
+                        reason or "Rejected interactively.",
+                    )
+                )
+                return CliCommandResult(
+                    {
+                        "command": "patch reject",
+                        "lifecycle_state": rejected.lifecycle.state.value,
+                        "proposal_id": proposal_id,
+                        "reason": rejected.reason,
+                        "status": "rejected",
+                    }
+                )
+        except (
+            PatchProposalNotFoundError,
+            PatchWorkflowStateError,
+            StaleProjectStateError,
+        ) as error:
+            return _patch_workflow_failure(error)
+        return _patch_failure(
+            "CLI_PATCH_OPERATION_INVALID",
+            "Unknown patch authorization operation.",
+        )
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -682,6 +785,34 @@ class _MockProviders:
             MockProviderScenario.SUCCESSFUL_ANALYSIS,
             datetime.now(UTC),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _FixedProjectState:
+    current: ProjectFingerprint
+
+    def fingerprint(self, proposal: PatchProposal) -> ProjectFingerprint:
+        del proposal
+        return self.current
+
+
+class _UnavailablePatchApplication:
+    def preview_application(
+        self,
+        proposal: PatchProposal,
+        proposal_fingerprint: ProposalFingerprint,
+    ) -> PatchApplicationPreview:
+        del proposal_fingerprint
+        return PatchApplicationPreview(proposal.proposal_id, ())
+
+    def apply_proposal(
+        self,
+        proposal: PatchProposal,
+        proposal_fingerprint: ProposalFingerprint,
+        approval: ApprovalRecord,
+    ) -> PatchApplicationResult:
+        del proposal, proposal_fingerprint, approval
+        raise RuntimeError("patch application is unavailable in this increment")
 
 
 def _diagnostics(collection: DiagnosticCollection) -> tuple[dict[str, object], ...]:
@@ -1006,6 +1137,17 @@ def _patch_failure(code: str, message: str) -> CliCommandResult:
             },
         ),
     )
+
+
+def _patch_workflow_failure(error: Exception) -> CliCommandResult:
+    code = (
+        "CLI_PATCH_STALE"
+        if isinstance(error, StaleProjectStateError)
+        else "CLI_PATCH_STATE_INVALID"
+        if isinstance(error, PatchWorkflowStateError)
+        else "CLI_PATCH_PROPOSAL_NOT_FOUND"
+    )
+    return _patch_failure(code, str(error))
 
 
 def resolve_cli_project(

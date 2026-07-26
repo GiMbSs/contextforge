@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from contextforge.application.messages import ApplyPatchProposal, ApprovePatchProposal
+from contextforge.application.messages import (
+    ApplyPatchProposal,
+    ApprovePatchProposal,
+    RejectPatchProposal,
+)
 from contextforge.application.patches import (
     PatchApplication,
     PatchApplicationResult,
@@ -47,6 +51,15 @@ class PatchWorkflowStorage(Protocol):
 
     def save_approval(self, approval: ApprovalRecord) -> None:
         """Persist explicit approval before any application attempt."""
+        ...
+
+    def save_rejection(
+        self,
+        proposal_id: PatchProposalId,
+        reason: str,
+        rejected_at: datetime,
+    ) -> None:
+        """Persist the auditable reason for an explicit rejection."""
         ...
 
     def load_approval(self, approval_id: ApprovalId) -> ApprovalRecord | None:
@@ -106,6 +119,14 @@ class PatchApplyResult:
     lifecycle: PatchProposalLifecycle
 
 
+@dataclass(frozen=True, slots=True)
+class PatchRejectionResult:
+    """Durable rejection reason and its resulting lifecycle."""
+
+    reason: str
+    lifecycle: PatchProposalLifecycle
+
+
 class PatchApprovalApplicationPipeline:
     """Record explicit approval before authorizing a patch application."""
 
@@ -152,6 +173,27 @@ class PatchApprovalApplicationPipeline:
         self._storage.save_approval(approval)
         self._storage.save_lifecycle(approved)
         return PatchApprovalResult(approval, approved)
+
+    def reject(self, command: RejectPatchProposal) -> PatchRejectionResult:
+        """Record an explicit rejection without applying project changes."""
+        if not isinstance(command, RejectPatchProposal):
+            raise TypeError("command must be a RejectPatchProposal")
+        proposal, lifecycle = self._load_workflow(command.proposal_id)
+        self._require_state(lifecycle, ProposalLifecycleState.AWAITING_APPROVAL)
+        proposal_fingerprint = fingerprint_patch_proposal(proposal)
+        rejected_at = self._clock()
+        rejected = lifecycle.transition(
+            ProposalLifecycleState.REJECTED,
+            at=rejected_at,
+            proposal_fingerprint=proposal_fingerprint,
+        )
+        self._storage.save_rejection(
+            proposal.proposal_id,
+            command.reason,
+            rejected_at,
+        )
+        self._storage.save_lifecycle(rejected)
+        return PatchRejectionResult(command.reason, rejected)
 
     def apply(self, command: ApplyPatchProposal) -> PatchApplyResult:
         """Apply only an exact proposal with separately persisted approval."""

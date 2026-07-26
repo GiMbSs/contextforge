@@ -4,11 +4,34 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
+from contextforge.application import PatchApplicationResult
+from contextforge.diagnostics import DiagnosticCode, DiagnosticSeverity
+from contextforge.domain import (
+    ApprovalId,
+    ArtifactPath,
+    ContentFingerprint,
+    InferenceRequestId,
+    InferenceResponseId,
+    PatchProposalId,
+    ProjectFingerprint,
+    ProposalFingerprint,
+    TaskId,
+)
 from contextforge.patch import (
+    ApprovalMethod,
+    ApprovalRecord,
+    PatchApprovalState,
+    PatchDiagnostic,
+    PatchOperation,
     PatchProposal,
     PatchProposalLifecycle,
+    PatchValidationState,
+    PatchValidationSummary,
+    ProposalLifecycleState,
+    ProposedChange,
     fingerprint_patch_proposal,
 )
 from contextforge.project import ProjectRoot
@@ -73,6 +96,114 @@ class LocalPatchProposalStorage:
             return None
         return _read_record(self._directory / f"{proposal_id}.json")
 
+    def load_proposal(self, proposal_id: PatchProposalId) -> PatchProposal | None:
+        """Rehydrate one persisted immutable proposal."""
+        record = self.load_record(str(proposal_id))
+        return _load_proposal(record) if record is not None else None
+
+    def load_lifecycle(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> PatchProposalLifecycle | None:
+        """Rehydrate the current lifecycle bound to a proposal."""
+        record = self.load_record(str(proposal_id))
+        return _load_lifecycle(record) if record is not None else None
+
+    def save_lifecycle(self, lifecycle: PatchProposalLifecycle) -> None:
+        """Atomically update the lifecycle of an existing proposal."""
+        record = self.load_record(str(lifecycle.proposal_id))
+        if record is None:
+            raise ValueError("proposal is unavailable")
+        record["lifecycle"] = {
+            "proposal_fingerprint": str(lifecycle.proposal_fingerprint),
+            "state": lifecycle.state.value,
+            "transitioned_at": lifecycle.transitioned_at.isoformat(),
+        }
+        self._write_record(lifecycle.proposal_id, record)
+
+    def save_approval(self, approval: ApprovalRecord) -> None:
+        """Persist explicit approval evidence atomically."""
+        directory = self.root.path / ".contextforge" / "approvals"
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{approval.approval_id}.json"
+        temporary = directory / f"{approval.approval_id}.json.tmp"
+        payload = {
+            "acknowledged_warnings": list(approval.acknowledged_warnings),
+            "approval_id": str(approval.approval_id),
+            "approved_at": approval.approved_at.isoformat(),
+            "approving_principal": approval.approving_principal,
+            "method": approval.method.value,
+            "project_fingerprint": str(approval.project_fingerprint),
+            "proposal_fingerprint": str(approval.proposal_fingerprint),
+            "proposal_id": str(approval.proposal_id),
+        }
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+
+    def load_approval(self, approval_id: ApprovalId) -> ApprovalRecord | None:
+        """Load exact persisted approval evidence."""
+        source = self.root.path / ".contextforge" / "approvals" / f"{approval_id}.json"
+        record = _read_json_object(source)
+        if record is None:
+            return None
+        try:
+            raw_warnings = record.get("acknowledged_warnings", [])
+            if not isinstance(raw_warnings, list):
+                return None
+            return ApprovalRecord(
+                ApprovalId(str(record["approval_id"])),
+                PatchProposalId(str(record["proposal_id"])),
+                ProposalFingerprint(str(record["proposal_fingerprint"])),
+                ProjectFingerprint(str(record["project_fingerprint"])),
+                datetime.fromisoformat(str(record["approved_at"])),
+                ApprovalMethod(str(record["method"])),
+                (
+                    str(record["approving_principal"])
+                    if record.get("approving_principal") is not None
+                    else None
+                ),
+                tuple(str(item) for item in raw_warnings),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def save_rejection(
+        self,
+        proposal_id: PatchProposalId,
+        reason: str,
+        rejected_at: datetime,
+    ) -> None:
+        """Persist explicit rejection evidence with the proposal."""
+        record = self.load_record(str(proposal_id))
+        if record is None:
+            raise ValueError("proposal is unavailable")
+        record["rejection"] = {
+            "reason": reason,
+            "rejected_at": rejected_at.isoformat(),
+        }
+        self._write_record(proposal_id, record)
+
+    def save_application_result(self, result: PatchApplicationResult) -> None:
+        """Reserve the workflow port; application persistence arrives in I088."""
+        del result
+        raise NotImplementedError("patch application is not implemented")
+
+    def _write_record(
+        self,
+        proposal_id: PatchProposalId,
+        record: dict[str, object],
+    ) -> None:
+        destination = self._directory / f"{proposal_id}.json"
+        temporary = self._directory / f"{proposal_id}.json.tmp"
+        temporary.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+
     @property
     def _directory(self) -> Path:
         return self.root.path / ".contextforge" / "proposals"
@@ -132,11 +263,8 @@ def _proposal_record(
 
 
 def _read_record(source: Path) -> dict[str, object] | None:
-    try:
-        loaded = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(loaded, dict):
+    loaded = _read_json_object(source)
+    if loaded is None:
         return None
     required = {
         "changes",
@@ -147,3 +275,86 @@ def _read_record(source: Path) -> dict[str, object] | None:
         "validation",
     }
     return loaded if required <= loaded.keys() else None
+
+
+def _read_json_object(source: Path) -> dict[str, object] | None:
+    try:
+        loaded = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
+def _load_proposal(record: dict[str, object]) -> PatchProposal | None:
+    try:
+        raw_validation = record["validation"]
+        raw_changes = record["changes"]
+        if not isinstance(raw_validation, dict) or not isinstance(raw_changes, list):
+            return None
+        raw_diagnostics = raw_validation.get("diagnostics", [])
+        if not isinstance(raw_diagnostics, list):
+            return None
+        diagnostics = tuple(
+            PatchDiagnostic(
+                DiagnosticCode(str(item["code"])),
+                DiagnosticSeverity(str(item["severity"])),
+                str(item["message"]),
+                str(item["change_id"]) if item.get("change_id") is not None else None,
+            )
+            for item in raw_diagnostics
+            if isinstance(item, dict)
+        )
+        changes = tuple(_load_change(item) for item in raw_changes if isinstance(item, dict))
+        return PatchProposal(
+            PatchProposalId(str(record["proposal_id"])),
+            TaskId(str(record["task_id"])),
+            InferenceRequestId(str(record["request_id"])),
+            InferenceResponseId(str(record["response_id"])),
+            ProjectFingerprint(str(record["project_fingerprint"])),
+            changes,
+            PatchValidationSummary(
+                PatchValidationState(str(raw_validation["state"])),
+                datetime.fromisoformat(str(raw_validation["validated_at"])),
+                diagnostics,
+            ),
+            datetime.fromisoformat(str(record["created_at"])),
+            str(record["summary"]) if record.get("summary") is not None else None,
+            PatchApprovalState.PENDING,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _load_change(record: dict[str, object]) -> ProposedChange:
+    expected = record.get("expected_old_fingerprint")
+    destination = record.get("destination_path")
+    assumptions = record.get("assumptions", ())
+    if not isinstance(assumptions, list):
+        raise TypeError("persisted assumptions are invalid")
+    return ProposedChange(
+        str(record["change_id"]),
+        ArtifactPath(str(record["path"])),
+        PatchOperation(str(record["operation"])),
+        str(record["explanation"]),
+        str(record["patch_payload"]) if record.get("patch_payload") is not None else None,
+        ArtifactPath(str(destination)) if destination is not None else None,
+        tuple(str(item) for item in assumptions),
+        ContentFingerprint(str(expected)) if expected is not None else None,
+    )
+
+
+def _load_lifecycle(record: dict[str, object]) -> PatchProposalLifecycle | None:
+    raw = record.get("lifecycle")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return PatchProposalLifecycle(
+            PatchProposalId(str(record["proposal_id"])),
+            ProposalFingerprint(str(raw["proposal_fingerprint"])),
+            ProposalLifecycleState(str(raw["state"])),
+            datetime.fromisoformat(str(raw["transitioned_at"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
