@@ -4,8 +4,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from contextforge.adapters.filesystem import patches as patch_adapter
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
 from contextforge.adapters.project_commands import LocalProjectCommandGateway
 from contextforge.cli.main import app
@@ -99,6 +101,67 @@ def _persist_proposal(project: Path) -> str:
     )
     LocalPatchProposalStorage(root).save(proposal, lifecycle)
     return str(proposal.proposal_id)
+
+
+def _persist_applicable_proposal(project: Path, *, change_count: int = 1) -> str:
+    (project / ".contextforge").mkdir(exist_ok=True)
+    root = ProjectRoot(project.resolve(), ProjectRootSource.EXPLICIT)
+    project_fingerprint = ProjectFingerprint(
+        str(LocalProjectCommandGateway().scan(root).data["project_fingerprint"])
+    )
+    proposal = PatchProposal(
+        new_patch_proposal_id(),
+        new_task_id(),
+        new_inference_request_id(),
+        new_inference_response_id(),
+        project_fingerprint,
+        tuple(
+            ProposedChange(
+                f"change-{number}",
+                ArtifactPath(f"created-{number}.txt"),
+                PatchOperation.CREATE,
+                "Create an approved file.",
+                patch_payload=f"created {number}\n",
+            )
+            for number in range(1, change_count + 1)
+        ),
+        PatchValidationSummary(PatchValidationState.VALID, NOW),
+        NOW,
+        "Create approved files.",
+    )
+    fingerprint = fingerprint_patch_proposal(proposal)
+    lifecycle = (
+        PatchProposalLifecycle.proposed(proposal.proposal_id, fingerprint, NOW)
+        .transition(
+            ProposalLifecycleState.VALIDATED,
+            at=NOW,
+            proposal_fingerprint=fingerprint,
+        )
+        .transition(
+            ProposalLifecycleState.AWAITING_APPROVAL,
+            at=NOW,
+            proposal_fingerprint=fingerprint,
+        )
+    )
+    LocalPatchProposalStorage(root).save(proposal, lifecycle)
+    return str(proposal.proposal_id)
+
+
+def _approve_non_interactively(project: Path, proposal_id: str) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(project),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+    assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
 
 
 def test_patch_list_and_show_use_persisted_application_result(tmp_path: Path) -> None:
@@ -350,3 +413,105 @@ def test_approval_binding_cannot_bypass_interactive_confirmation(
 
     assert result.exit_code == 1
     assert "CLI_PATCH_APPROVAL_MODE_INVALID" in result.stderr
+
+
+def test_patch_apply_uses_approved_staged_application_and_persists_result(
+    tmp_path: Path,
+) -> None:
+    proposal_id = _persist_applicable_proposal(tmp_path)
+    _approve_non_interactively(tmp_path, proposal_id)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "apply",
+            proposal_id,
+        ],
+    )
+
+    assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
+    assert (tmp_path / "created-1.txt").read_text(encoding="utf-8") == "created 1\n"
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "applied"
+    assert payload["lifecycle_state"] == "applied"
+    application = json.loads(
+        (tmp_path / ".contextforge" / "applications" / f"{proposal_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert application["status"] == "applied"
+    assert application["applied_change_ids"] == ["change-1"]
+
+
+def test_patch_apply_requires_active_approval(tmp_path: Path) -> None:
+    proposal_id = _persist_applicable_proposal(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["--project", str(tmp_path), "patch", "apply", proposal_id],
+    )
+
+    assert result.exit_code == 1
+    assert "CLI_PATCH_APPROVAL_REQUIRED" in result.stderr
+    assert not (tmp_path / "created-1.txt").exists()
+
+
+def test_patch_apply_rejects_stale_project_state(tmp_path: Path) -> None:
+    proposal_id = _persist_applicable_proposal(tmp_path)
+    _approve_non_interactively(tmp_path, proposal_id)
+    (tmp_path / "unexpected.txt").write_text("changed\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["--project", str(tmp_path), "patch", "apply", proposal_id],
+    )
+
+    assert result.exit_code == 1
+    assert "CLI_PATCH_STALE" in result.stderr
+    assert not (tmp_path / "created-1.txt").exists()
+
+
+def test_patch_apply_reports_partial_application_with_recovery_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proposal_id = _persist_applicable_proposal(tmp_path, change_count=2)
+    _approve_non_interactively(tmp_path, proposal_id)
+    original_apply = patch_adapter._apply_change
+
+    def fail_second_change(
+        root: Path,
+        change: ProposedChange,
+        staged_files: dict[str, Path],
+    ) -> None:
+        if change.change_id == "change-2":
+            raise OSError("injected application failure")
+        original_apply(root, change, staged_files)
+
+    monkeypatch.setattr(patch_adapter, "_apply_change", fail_second_change)
+    monkeypatch.setattr(patch_adapter, "_rollback_and_verify", lambda *_args: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "apply",
+            proposal_id,
+        ],
+    )
+
+    assert result.exit_code == 17
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "partially_applied"
+    assert payload["applied_change_ids"] == ["change-1"]
+    assert payload["unapplied_change_ids"] == ["change-2"]
+    assert payload["recovery_reference"] is not None

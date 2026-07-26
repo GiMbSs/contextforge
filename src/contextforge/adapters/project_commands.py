@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,16 +17,22 @@ import typer
 from contextforge.adapters.filesystem import (
     LocalProjectInitialization,
     LocalProjectScanner,
+    LocalStagedPatchApplication,
 )
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
 from contextforge.application import (
     AnalysisExecutionPipeline,
+    ApplicationPreflightEvidence,
+    ApplyPatchProposal,
     ApprovePatchProposal,
     ExecuteTask,
     InitializeProject,
     PatchApplicationPreview,
     PatchApplicationResult,
+    PatchApplicationStatus,
     PatchApprovalApplicationPipeline,
+    PatchApprovalBindingError,
+    PatchApprovalNotFoundError,
     PatchProposalNotFoundError,
     PatchWorkflowStateError,
     ProjectInitialization,
@@ -41,6 +48,7 @@ from contextforge.context import (
 )
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
+    ArtifactPath,
     IndexId,
     InventoryId,
     PatchProposalId,
@@ -50,6 +58,7 @@ from contextforge.domain import (
     RequestedOutput,
     TaskKind,
     TaskSpecification,
+    fingerprint_content,
     new_context_bundle_id,
     new_retrieval_id,
     new_task_id,
@@ -59,7 +68,13 @@ from contextforge.indexer import (
     IndexRequest,
     ProjectIndex,
 )
-from contextforge.patch import ApprovalMethod, ApprovalRecord, PatchProposal
+from contextforge.patch import (
+    ApprovalMethod,
+    ApprovalRecord,
+    PatchProposal,
+    PatchSourceArtifact,
+    PatchSourceState,
+)
 from contextforge.project import ProjectRoot, resolve_project_root
 from contextforge.prompt import InferenceRequest
 from contextforge.provider import (
@@ -157,6 +172,12 @@ class ProjectCommandGateway(Protocol):
         *,
         approval_method: str = "interactive",
         reason: str | None = None,
+    ) -> CliCommandResult: ...
+
+    def apply_patch_proposal(
+        self,
+        root: ProjectRoot,
+        proposal_id: str,
     ) -> CliCommandResult: ...
 
 
@@ -663,6 +684,80 @@ class LocalProjectCommandGateway:
             "Unknown patch authorization operation.",
         )
 
+    def apply_patch_proposal(
+        self,
+        root: ProjectRoot,
+        proposal_id: str,
+    ) -> CliCommandResult:
+        try:
+            selected_id = PatchProposalId(proposal_id)
+        except (TypeError, ValueError):
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        storage = LocalPatchProposalStorage(root)
+        proposal = storage.load_proposal(selected_id)
+        if proposal is None:
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        approval = storage.load_active_approval(selected_id)
+        if approval is None:
+            return _patch_failure(
+                "CLI_PATCH_APPROVAL_REQUIRED",
+                "An active Approval Record is required before application.",
+            )
+        application = LocalStagedPatchApplication(
+            root,
+            lambda: _application_evidence(self, root, proposal),
+        )
+        pipeline = PatchApprovalApplicationPipeline(
+            storage=storage,
+            project_state=_FixedProjectState(self._scan(root).project_fingerprint),
+            application=application,
+        )
+        try:
+            result = pipeline.apply(ApplyPatchProposal(selected_id, approval.approval_id))
+        except (
+            PatchApprovalBindingError,
+            PatchApprovalNotFoundError,
+            PatchProposalNotFoundError,
+            PatchWorkflowStateError,
+            StaleProjectStateError,
+        ) as error:
+            return _patch_application_failure(error)
+        applied = result.application
+        data: dict[str, object] = {
+            "applied_change_ids": list(applied.applied_change_ids),
+            "command": "patch apply",
+            "lifecycle_state": result.lifecycle.state.value,
+            "proposal_id": proposal_id,
+            "recovery_reference": applied.recovery_reference,
+            "rollback_verified": applied.rollback_verified,
+            "status": applied.status.value,
+            "unapplied_change_ids": list(applied.unapplied_change_ids),
+        }
+        diagnostics: tuple[dict[str, object], ...] = tuple(
+            {
+                "capability": "patch_application",
+                "change_id": diagnostic.change_id,
+                "code": str(diagnostic.code),
+                "message": diagnostic.message,
+                "severity": diagnostic.severity.value,
+            }
+            for diagnostic in applied.diagnostics
+        )
+        exit_code = (
+            CliExitCode.SUCCESS
+            if applied.status is PatchApplicationStatus.APPLIED
+            else CliExitCode.PARTIAL_RESULT
+            if applied.status is PatchApplicationStatus.PARTIALLY_APPLIED
+            else CliExitCode.GENERAL_FAILURE
+        )
+        return CliCommandResult(data, exit_code, diagnostics)
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -816,6 +911,40 @@ class _UnavailablePatchApplication:
     ) -> PatchApplicationResult:
         del proposal, proposal_fingerprint, approval
         raise RuntimeError("patch application is unavailable in this increment")
+
+
+def _application_evidence(
+    gateway: LocalProjectCommandGateway,
+    root: ProjectRoot,
+    proposal: PatchProposal,
+) -> ApplicationPreflightEvidence:
+    paths = {
+        path
+        for change in proposal.changes
+        for path in (change.path, change.destination_path)
+        if path is not None
+    }
+    artifacts: list[PatchSourceArtifact] = []
+    writable: list[ArtifactPath] = []
+    for path in sorted(paths):
+        target = root.path.joinpath(*path.parts)
+        if target.is_file():
+            try:
+                content_fingerprint = fingerprint_content(target.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                content_fingerprint = None
+            artifacts.append(PatchSourceArtifact(path, content_fingerprint))
+        ancestor = target if target.exists() else target.parent
+        while not ancestor.exists() and ancestor != root.path:
+            ancestor = ancestor.parent
+        if os.access(ancestor, os.W_OK):
+            writable.append(path)
+    return ApplicationPreflightEvidence(
+        gateway._scan(root).project_fingerprint,
+        PatchSourceState(tuple(artifacts)),
+        tuple(writable),
+        not (root.path / ".contextforge" / "mutation.lock").exists(),
+    )
 
 
 def _diagnostics(collection: DiagnosticCollection) -> tuple[dict[str, object], ...]:
@@ -1150,6 +1279,18 @@ def _patch_workflow_failure(error: Exception) -> CliCommandResult:
         if isinstance(error, PatchWorkflowStateError)
         else "CLI_PATCH_PROPOSAL_NOT_FOUND"
     )
+    return _patch_failure(code, str(error))
+
+
+def _patch_application_failure(error: Exception) -> CliCommandResult:
+    if isinstance(error, StaleProjectStateError):
+        code = "CLI_PATCH_STALE"
+    elif isinstance(error, (PatchApprovalBindingError, PatchApprovalNotFoundError)):
+        code = "CLI_PATCH_SECURITY_REJECTED"
+    elif isinstance(error, PatchWorkflowStateError):
+        code = "CLI_PATCH_APPROVAL_REQUIRED"
+    else:
+        code = "CLI_PATCH_PROPOSAL_NOT_FOUND"
     return _patch_failure(code, str(error))
 
 

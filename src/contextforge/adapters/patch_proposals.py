@@ -142,6 +142,11 @@ class LocalPatchProposalStorage:
             encoding="utf-8",
         )
         temporary.replace(destination)
+        record = self.load_record(str(approval.proposal_id))
+        if record is None:
+            raise ValueError("approved proposal is unavailable")
+        record["active_approval_id"] = str(approval.approval_id)
+        self._write_record(approval.proposal_id, record)
 
     def load_approval(self, approval_id: ApprovalId) -> ApprovalRecord | None:
         """Load exact persisted approval evidence."""
@@ -170,6 +175,22 @@ class LocalPatchProposalStorage:
         except (KeyError, TypeError, ValueError):
             return None
 
+    def load_active_approval(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> ApprovalRecord | None:
+        """Load approval explicitly associated with one proposal workflow."""
+        record = self.load_record(str(proposal_id))
+        if record is None:
+            return None
+        raw_approval_id = record.get("active_approval_id")
+        if not isinstance(raw_approval_id, str):
+            return None
+        try:
+            return self.load_approval(ApprovalId(raw_approval_id))
+        except ValueError:
+            return None
+
     def save_rejection(
         self,
         proposal_id: PatchProposalId,
@@ -187,9 +208,33 @@ class LocalPatchProposalStorage:
         self._write_record(proposal_id, record)
 
     def save_application_result(self, result: PatchApplicationResult) -> None:
-        """Reserve the workflow port; application persistence arrives in I088."""
-        del result
-        raise NotImplementedError("patch application is not implemented")
+        """Persist every application outcome atomically."""
+        directory = self.root.path / ".contextforge" / "applications"
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{result.proposal_id}.json"
+        temporary = directory / f"{result.proposal_id}.json.tmp"
+        payload = {
+            "applied_change_ids": list(result.applied_change_ids),
+            "diagnostics": [
+                {
+                    "change_id": diagnostic.change_id,
+                    "code": str(diagnostic.code),
+                    "message": diagnostic.message,
+                    "severity": diagnostic.severity.value,
+                }
+                for diagnostic in result.diagnostics
+            ],
+            "proposal_id": str(result.proposal_id),
+            "recovery_reference": result.recovery_reference,
+            "rollback_verified": result.rollback_verified,
+            "status": result.status.value,
+            "unapplied_change_ids": list(result.unapplied_change_ids),
+        }
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
 
     def _write_record(
         self,

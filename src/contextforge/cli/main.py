@@ -570,6 +570,25 @@ def patch_reject(
     _authorize_patch(ctx, "reject", proposal_id, reason=reason)
 
 
+@patch_app.command("apply")
+def patch_apply(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument(help="Exact approved proposal identifier.")],
+) -> None:
+    """Apply an approved proposal through the authorized application service."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.apply_patch_proposal(root, proposal_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
 def main() -> None:
     """Run the ContextForge CLI adapter."""
     app()
