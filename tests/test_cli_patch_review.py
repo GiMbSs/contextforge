@@ -279,4 +279,74 @@ def test_patch_approval_refuses_non_interactive_mode(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 1
-    assert "CLI_PATCH_INTERACTIVE_REQUIRED" in result.stderr
+    assert "CLI_PATCH_APPROVAL_BINDING_REQUIRED" in result.stderr
+
+
+def test_non_interactive_approval_requires_exact_bound_identifier(
+    tmp_path: Path,
+) -> None:
+    proposal_id = _persist_proposal(tmp_path)
+
+    mismatch = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            "patch_proposal_mismatch",
+        ],
+    )
+    approved = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "--format",
+            "json",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+
+    assert mismatch.exit_code == 1
+    assert "CLI_PATCH_APPROVAL_BINDING_MISMATCH" in mismatch.stderr
+    assert approved.exit_code == 0
+    payload = json.loads(approved.stdout)
+    assert payload["method"] == "non_interactive"
+    assert payload["proposal_id"] == proposal_id
+
+    approvals = tuple((tmp_path / ".contextforge" / "approvals").glob("*.json"))
+    assert len(approvals) == 1
+    approval = json.loads(approvals[0].read_text(encoding="utf-8"))
+    assert approval["method"] == "non_interactive"
+    assert approval["proposal_id"] == proposal_id
+
+
+def test_approval_binding_cannot_bypass_interactive_confirmation(
+    tmp_path: Path,
+) -> None:
+    proposal_id = _persist_proposal(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "CLI_PATCH_APPROVAL_MODE_INVALID" in result.stderr

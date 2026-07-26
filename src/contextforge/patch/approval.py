@@ -18,6 +18,7 @@ class ApprovalMethod(StrEnum):
     """Auditable mechanism through which approval was granted."""
 
     INTERACTIVE = "interactive"
+    NON_INTERACTIVE = "non_interactive"
     POLICY = "policy"
     API = "api"
 

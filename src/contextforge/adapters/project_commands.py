@@ -155,6 +155,7 @@ class ProjectCommandGateway(Protocol):
         operation: str,
         proposal_id: str,
         *,
+        approval_method: str = "interactive",
         reason: str | None = None,
     ) -> CliCommandResult: ...
 
@@ -586,6 +587,7 @@ class LocalProjectCommandGateway:
         operation: str,
         proposal_id: str,
         *,
+        approval_method: str = "interactive",
         reason: str | None = None,
     ) -> CliCommandResult:
         try:
@@ -618,7 +620,7 @@ class LocalProjectCommandGateway:
                 approved = pipeline.approve(
                     ApprovePatchProposal(
                         selected_id,
-                        ApprovalMethod.INTERACTIVE,
+                        ApprovalMethod(approval_method),
                         acknowledged_warnings=warning_codes,
                     )
                 )
@@ -627,6 +629,7 @@ class LocalProjectCommandGateway:
                         "approval_id": str(approved.approval.approval_id),
                         "command": "patch approve",
                         "lifecycle_state": approved.lifecycle.state.value,
+                        "method": approved.approval.method.value,
                         "project_fingerprint": str(approved.approval.project_fingerprint),
                         "proposal_fingerprint": str(approved.approval.proposal_fingerprint),
                         "proposal_id": proposal_id,

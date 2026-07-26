@@ -443,12 +443,32 @@ def _authorize_patch(
     operation: str,
     proposal_id: str,
     *,
+    approval_binding: str | None = None,
     reason: str | None = None,
 ) -> None:
     options = ctx.ensure_object(GlobalOptions)
-    if options.non_interactive:
+    if options.non_interactive and operation != "approve":
         typer.echo(
             "CLI_PATCH_INTERACTIVE_REQUIRED: Interactive confirmation is required.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+    if options.non_interactive and approval_binding is None:
+        typer.echo(
+            "CLI_PATCH_APPROVAL_BINDING_REQUIRED: "
+            "--approve must contain the exact proposal identifier.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+    if approval_binding is not None and approval_binding != proposal_id:
+        typer.echo(
+            "CLI_PATCH_APPROVAL_BINDING_MISMATCH: --approve does not match the selected proposal.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
+    if not options.non_interactive and approval_binding is not None:
+        typer.echo(
+            "CLI_PATCH_APPROVAL_MODE_INVALID: --approve is only accepted with --non-interactive.",
             err=True,
         )
         raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
@@ -468,13 +488,16 @@ def _authorize_patch(
         raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
     warnings = review.get("warnings", [])
     operation_counts = review.get("operation_counts", {})
-    typer.echo(f"Proposal: {proposal_id}")
-    typer.echo(f"Project fingerprint: {review.get('project_fingerprint')}")
-    typer.echo(f"Affected files: {len(review.get('affected_files', []))}")
-    typer.echo(f"Operations: {operation_counts}")
-    typer.echo(f"Warnings: {len(warnings)}")
+    if not options.non_interactive:
+        typer.echo(f"Proposal: {proposal_id}")
+        typer.echo(f"Project fingerprint: {review.get('project_fingerprint')}")
+        typer.echo(f"Affected files: {len(review.get('affected_files', []))}")
+        typer.echo(f"Operations: {operation_counts}")
+        typer.echo(f"Warnings: {len(warnings)}")
 
-    if operation == "approve":
+    if options.non_interactive:
+        confirmed = True
+    elif operation == "approve":
         high_risk = any(
             isinstance(warning, dict) and "PROTECTED" in str(warning.get("code", ""))
             for warning in warnings
@@ -505,6 +528,7 @@ def _authorize_patch(
         root,
         operation,
         proposal_id,
+        approval_method=("non_interactive" if options.non_interactive else "interactive"),
         reason=reason,
     )
     render_result(result, output_format=options.output_format)
@@ -516,9 +540,21 @@ def _authorize_patch(
 def patch_approve(
     ctx: typer.Context,
     proposal_id: Annotated[str, typer.Argument(help="Exact proposal identifier.")],
+    approval_binding: Annotated[
+        str | None,
+        typer.Option(
+            "--approve",
+            help="Repeat the exact proposal identifier in non-interactive mode.",
+        ),
+    ] = None,
 ) -> None:
     """Interactively approve one exact persisted proposal."""
-    _authorize_patch(ctx, "approve", proposal_id)
+    _authorize_patch(
+        ctx,
+        "approve",
+        proposal_id,
+        approval_binding=approval_binding,
+    )
 
 
 @patch_app.command("reject")
