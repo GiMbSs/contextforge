@@ -25,6 +25,7 @@ from contextforge.application import (
 from contextforge.configuration import ScannerConfig
 from contextforge.context import (
     ContextBundle,
+    ContextBundleSerializer,
     ContextCoverage,
     ContextStatistics,
 )
@@ -97,6 +98,15 @@ class ProjectCommandGateway(Protocol):
         root: ProjectRoot,
         task_text: str,
         provider_id: str,
+    ) -> CliCommandResult: ...
+
+    def inspect_context(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        target: str | None = None,
+        destination: Path | None = None,
     ) -> CliCommandResult: ...
 
 
@@ -229,6 +239,7 @@ class LocalProjectCommandGateway:
             RequestedOutput.ANALYSIS,
         )
         result = pipeline.execute(ExecuteTask(_project_id(root), task, provider_id))
+        self._persist_context(root, result.context_bundle)
         return CliCommandResult(
             {
                 "command": "run",
@@ -242,6 +253,99 @@ class LocalProjectCommandGateway:
             },
             diagnostics=_diagnostics(result.diagnostics),
         )
+
+    def inspect_context(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        target: str | None = None,
+        destination: Path | None = None,
+    ) -> CliCommandResult:
+        stored = _load_context(root)
+        if stored is None:
+            return _context_failure(
+                "CLI_CONTEXT_NOT_FOUND",
+                "No persisted Context Bundle is available.",
+            )
+        if operation == "show":
+            data = {
+                key: stored[key]
+                for key in (
+                    "bundle_id",
+                    "created_at",
+                    "coverage",
+                    "project_fingerprint",
+                    "retrieval_id",
+                    "statistics",
+                )
+            }
+            data["command"] = "context show"
+            data["status"] = "available"
+            return CliCommandResult(data)
+        items = stored["items"]
+        if not isinstance(items, list):
+            return _context_failure("CLI_CONTEXT_INVALID", "Persisted context items are invalid.")
+        if operation == "list":
+            return CliCommandResult(
+                {
+                    "bundle_id": stored["bundle_id"],
+                    "command": "context list",
+                    "items": items,
+                    "status": "available",
+                }
+            )
+        if operation == "explain":
+            selected = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and target in (item.get("context_item_id"), item.get("path"))
+                ),
+                None,
+            )
+            if selected is None:
+                return _context_failure(
+                    "CLI_CONTEXT_ITEM_NOT_FOUND",
+                    "The requested context item or path is unavailable.",
+                )
+            return CliCommandResult(
+                {
+                    "bundle_id": stored["bundle_id"],
+                    "command": "context explain",
+                    "item": selected,
+                    "status": "available",
+                }
+            )
+        if operation == "export":
+            if destination is not None:
+                destination.write_text(
+                    json.dumps(stored, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            return CliCommandResult(
+                {
+                    "bundle": stored,
+                    "command": "context export",
+                    "destination": str(destination) if destination is not None else None,
+                    "status": "exported",
+                }
+            )
+        return _context_failure("CLI_CONTEXT_OPERATION_INVALID", "Unknown context operation.")
+
+    @staticmethod
+    def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
+        execution_directory = root.path / ".contextforge" / "executions"
+        execution_directory.mkdir(parents=True, exist_ok=True)
+        destination = execution_directory / "latest-context.json"
+        temporary = execution_directory / "latest-context.json.tmp"
+        payload = _context_payload(bundle)
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
 
     def _scan(self, root: ProjectRoot) -> ProjectInventory:
         return self.scanner.scan(ScanRequest(_project_id(root), root, self.scanner_configuration))
@@ -337,6 +441,80 @@ class _MockProviders:
 
 def _diagnostics(collection: DiagnosticCollection) -> tuple[dict[str, object], ...]:
     return tuple(item.to_dict() for item in collection)
+
+
+def _context_payload(bundle: ContextBundle) -> dict[str, object]:
+    items = []
+    for order, item in enumerate(bundle.items):
+        selected = item.selected_item
+        items.append(
+            {
+                "budget_cost": selected.estimated_bytes,
+                "context_item_id": item.context_item_id,
+                "evidence": [
+                    {
+                        "detail": evidence.detail,
+                        "source": evidence.source,
+                        "type": evidence.evidence_type,
+                    }
+                    for evidence in selected.rationale.evidence
+                ],
+                "order": order,
+                "path": item.source_path.value if item.source_path is not None else None,
+                "primary_reason": selected.rationale.primary_reason.value,
+                "rank": order + 1,
+                "sensitivity": selected.sensitivity_classification,
+                "source_reference": item.source_reference,
+                "type": selected.candidate_type.value,
+            }
+        )
+    return {
+        "bundle_id": str(bundle.bundle_id),
+        "created_at": bundle.created_at.isoformat(),
+        "coverage": {
+            field_name: getattr(bundle.coverage, field_name).value
+            for field_name in (
+                "targets",
+                "dependencies",
+                "interfaces",
+                "tests",
+                "configuration",
+                "constraints",
+                "error_locations",
+            )
+        },
+        "items": items,
+        "media_type": ContextBundleSerializer().serialize(bundle).media_type,
+        "project_fingerprint": str(bundle.project_fingerprint),
+        "retrieval_id": str(bundle.retrieval_id),
+        "statistics": {
+            field_name: getattr(bundle.statistics, field_name)
+            for field_name in bundle.statistics.__dataclass_fields__
+        },
+    }
+
+
+def _load_context(root: ProjectRoot) -> dict[str, object] | None:
+    source = root.path / ".contextforge" / "executions" / "latest-context.json"
+    try:
+        loaded = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _context_failure(code: str, message: str) -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "context_inspection",
+                "code": code,
+                "message": message,
+            },
+        ),
+    )
 
 
 def resolve_cli_project(

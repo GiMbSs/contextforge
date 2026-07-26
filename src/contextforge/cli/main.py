@@ -21,6 +21,8 @@ app = typer.Typer(
     add_completion=False,
 )
 _gateway = LocalProjectCommandGateway()
+context_app = typer.Typer(help="Inspect persisted Context Bundles.")
+app.add_typer(context_app, name="context")
 
 
 def _version_callback(value: bool) -> None:
@@ -199,6 +201,64 @@ def run(
         options.provider or "mock-provider",
     )
     render_result(result, output_format=options.output_format)
+
+
+def _inspect_context(
+    ctx: typer.Context,
+    operation: str,
+    *,
+    target: str | None = None,
+    destination: Path | None = None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.inspect_context(
+        root,
+        operation,
+        target=target,
+        destination=destination,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@context_app.command("show")
+def context_show(ctx: typer.Context) -> None:
+    """Show the latest persisted Context Bundle summary."""
+    _inspect_context(ctx, "show")
+
+
+@context_app.command("list")
+def context_list(ctx: typer.Context) -> None:
+    """List items from the latest persisted Context Bundle."""
+    _inspect_context(ctx, "list")
+
+
+@context_app.command("explain")
+def context_explain(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Argument(help="Context item identifier or project path.")],
+) -> None:
+    """Explain persisted selection evidence for one context item."""
+    _inspect_context(ctx, "explain", target=target)
+
+
+@context_app.command("export")
+def context_export(
+    ctx: typer.Context,
+    destination: Annotated[
+        Path | None,
+        typer.Option("--output", help="Explicit UTF-8 JSON destination."),
+    ] = None,
+) -> None:
+    """Export the latest persisted Context Bundle."""
+    _inspect_context(ctx, "export", destination=destination)
 
 
 def main() -> None:
