@@ -10,6 +10,10 @@ from contextforge.cli.main import app
 runner = CliRunner()
 
 
+def _payload(result: object) -> dict[str, object]:
+    return json.loads(result.stdout)["data"]  # type: ignore[attr-defined,no-any-return]
+
+
 def _run_analysis(project: Path) -> dict[str, object]:
     result = runner.invoke(
         app,
@@ -24,7 +28,7 @@ def _run_analysis(project: Path) -> dict[str, object]:
         ],
     )
     assert result.exit_code == 0
-    return json.loads(result.stdout)
+    return _payload(result)
 
 
 def test_context_show_and_list_use_persisted_run_result(tmp_path: Path) -> None:
@@ -43,10 +47,10 @@ def test_context_show_and_list_use_persisted_run_result(tmp_path: Path) -> None:
 
     assert show.exit_code == 0
     assert (
-        json.loads(show.stdout)["bundle_id"]
+        _payload(show)["bundle_id"]
         == json.loads(persisted.read_text(encoding="utf-8"))["bundle_id"]
     )
-    assert json.loads(listing.stdout)["items"] == []
+    assert _payload(listing)["items"] == []
 
 
 def test_context_export_writes_explicit_destination_without_rerun(tmp_path: Path) -> None:
@@ -71,7 +75,7 @@ def test_context_export_writes_explicit_destination_without_rerun(tmp_path: Path
     assert result.exit_code == 0
     exported = json.loads(export_path.read_text(encoding="utf-8"))
     assert exported["bundle_id"].startswith("context_bundle_")
-    assert json.loads(result.stdout)["destination"] == str(export_path)
+    assert _payload(result)["destination"] == str(export_path)
 
 
 def test_context_inspection_fails_when_no_persisted_result_exists(tmp_path: Path) -> None:
@@ -81,7 +85,7 @@ def test_context_inspection_fails_when_no_persisted_result_exists(tmp_path: Path
     )
 
     assert result.exit_code == 1
-    assert json.loads(result.stdout) == {"status": "failed"}
+    assert _payload(result) == {"status": "failed"}
     assert "CLI_CONTEXT_NOT_FOUND" in result.stderr
 
 

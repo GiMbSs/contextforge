@@ -37,6 +37,10 @@ runner = CliRunner()
 NOW = datetime(2026, 7, 26, tzinfo=UTC)
 
 
+def _payload(result: object) -> dict[str, object]:
+    return json.loads(result.stdout)["data"]  # type: ignore[attr-defined,no-any-return]
+
+
 def _persist_proposal(project: Path) -> str:
     (project / ".contextforge").mkdir()
     root = ProjectRoot(project.resolve(), ProjectRootSource.EXPLICIT)
@@ -185,11 +189,11 @@ def test_patch_list_and_show_use_persisted_application_result(tmp_path: Path) ->
     )
 
     assert listing.exit_code == 0
-    summary = json.loads(listing.stdout)["proposals"][0]
+    summary = _payload(listing)["proposals"][0]
     assert summary["proposal_id"] == proposal_id
     assert summary["change_count"] == 2
     assert summary["lifecycle_state"] == "awaiting_approval"
-    assert json.loads(shown.stdout)["proposal"]["proposal_id"] == proposal_id
+    assert _payload(shown)["proposal"]["proposal_id"] == proposal_id
 
 
 def test_patch_review_prioritizes_operations_files_warnings_and_state(
@@ -203,7 +207,7 @@ def test_patch_review_prioritizes_operations_files_warnings_and_state(
     )
 
     assert result.exit_code == 0
-    review = json.loads(result.stdout)["review"]
+    review = _payload(result)["review"]
     assert review["proposal_id"] == proposal_id
     assert review["affected_files"] == ["src/app.py", "tests/test_app.py"]
     assert review["operation_counts"] == {
@@ -240,7 +244,7 @@ def test_patch_export_writes_explicit_destination(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert json.loads(destination.read_text(encoding="utf-8"))["proposal_id"] == proposal_id
-    assert json.loads(result.stdout)["destination"] == str(destination)
+    assert _payload(result)["destination"] == str(destination)
 
 
 def test_patch_show_reports_missing_proposal(tmp_path: Path) -> None:
@@ -258,7 +262,7 @@ def test_patch_show_reports_missing_proposal(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 1
-    assert json.loads(result.stdout) == {"status": "failed"}
+    assert _payload(result) == {"status": "failed"}
     assert "CLI_PATCH_PROPOSAL_NOT_FOUND" in result.stderr
 
 
@@ -382,7 +386,7 @@ def test_non_interactive_approval_requires_exact_bound_identifier(
     assert mismatch.exit_code == 1
     assert "CLI_PATCH_APPROVAL_BINDING_MISMATCH" in mismatch.stderr
     assert approved.exit_code == 0
-    payload = json.loads(approved.stdout)
+    payload = _payload(approved)
     assert payload["method"] == "non_interactive"
     assert payload["proposal_id"] == proposal_id
 
@@ -436,7 +440,7 @@ def test_patch_apply_uses_approved_staged_application_and_persists_result(
 
     assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
     assert (tmp_path / "created-1.txt").read_text(encoding="utf-8") == "created 1\n"
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["status"] == "applied"
     assert payload["lifecycle_state"] == "applied"
     application = json.loads(
@@ -456,7 +460,7 @@ def test_patch_apply_requires_active_approval(tmp_path: Path) -> None:
         ["--project", str(tmp_path), "patch", "apply", proposal_id],
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 11
     assert "CLI_PATCH_APPROVAL_REQUIRED" in result.stderr
     assert not (tmp_path / "created-1.txt").exists()
 
@@ -471,7 +475,7 @@ def test_patch_apply_rejects_stale_project_state(tmp_path: Path) -> None:
         ["--project", str(tmp_path), "patch", "apply", proposal_id],
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 14
     assert "CLI_PATCH_STALE" in result.stderr
     assert not (tmp_path / "created-1.txt").exists()
 
@@ -510,7 +514,7 @@ def test_patch_apply_reports_partial_application_with_recovery_reference(
     )
 
     assert result.exit_code == 17
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["status"] == "partially_applied"
     assert payload["applied_change_ids"] == ["change-1"]
     assert payload["unapplied_change_ids"] == ["change-2"]

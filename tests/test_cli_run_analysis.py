@@ -36,7 +36,9 @@ def test_run_analysis_accepts_each_exact_task_source(tmp_path: Path, mode: str) 
     result = runner.invoke(app, arguments, input=input_text)
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    envelope = json.loads(result.stdout)
+    assert envelope["schema_version"] == "1.0"
+    payload = envelope["data"]
     assert payload["mode"] == "analysis_only"
     assert payload["task"] == task
     assert payload["summary"] == "Deterministic mock analysis."

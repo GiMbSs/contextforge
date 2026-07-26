@@ -10,6 +10,12 @@ from contextforge.cli.main import app
 runner = CliRunner()
 
 
+def _payload(result: object) -> dict[str, object]:
+    envelope = json.loads(result.stdout)  # type: ignore[attr-defined]
+    assert envelope["schema_version"] == "1.0"
+    return envelope["data"]
+
+
 def test_init_and_status_have_human_readable_output(tmp_path: Path) -> None:
     initialized = runner.invoke(app, ["init", str(tmp_path)])
     status = runner.invoke(app, ["--project", str(tmp_path), "status"])
@@ -30,7 +36,7 @@ def test_scan_json_is_parseable_and_diagnostics_stay_on_stderr(tmp_path: Path) -
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["command"] == "scan"
     assert payload["artifact_count"] >= 1
     assert result.stderr == ""
@@ -45,7 +51,7 @@ def test_index_json_reports_structured_counts(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["command"] == "index"
     assert payload["symbols"] >= 1
     assert payload["index_id"].startswith("index_")
@@ -58,5 +64,5 @@ def test_project_resolution_failure_has_stable_exit_and_stderr(tmp_path: Path) -
     )
 
     assert result.exit_code == 4
-    assert json.loads(result.stdout) == {"status": "failed"}
+    assert _payload(result) == {"status": "failed"}
     assert "CLI_PROJECT_NOT_FOUND" in result.stderr

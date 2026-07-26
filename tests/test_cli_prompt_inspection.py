@@ -10,6 +10,10 @@ from contextforge.cli.main import app
 runner = CliRunner()
 
 
+def _payload(result: object) -> dict[str, object]:
+    return json.loads(result.stdout)["data"]  # type: ignore[attr-defined,no-any-return]
+
+
 def _run_analysis(project: Path, task: str = "Explain this project.") -> dict[str, object]:
     result = runner.invoke(
         app,
@@ -24,7 +28,7 @@ def _run_analysis(project: Path, task: str = "Explain this project.") -> dict[st
         ],
     )
     assert result.exit_code == 0
-    return json.loads(result.stdout)
+    return _payload(result)
 
 
 def test_prompt_preview_and_measure_use_persisted_inference_request(
@@ -44,7 +48,7 @@ def test_prompt_preview_and_measure_use_persisted_inference_request(
     )
 
     assert preview.exit_code == 0
-    preview_data = json.loads(preview.stdout)
+    preview_data = _payload(preview)
     assert preview_data["request_id"] == run["request_id"]
     assert [section["section_id"] for section in preview_data["sections"]] == [
         "system-operating-rules",
@@ -53,7 +57,7 @@ def test_prompt_preview_and_measure_use_persisted_inference_request(
         "serialized-context-bundle",
         "output-response-contract",
     ]
-    assert json.loads(measure.stdout)["measurements"]["estimated_tokens"] > 0
+    assert _payload(measure)["measurements"]["estimated_tokens"] > 0
 
 
 def test_prompt_export_writes_safe_explicit_destination(tmp_path: Path) -> None:
@@ -84,7 +88,7 @@ def test_prompt_export_writes_safe_explicit_destination(tmp_path: Path) -> None:
     assert secret not in persisted_text
     assert secret not in exported_text
     assert "[REDACTED]" in exported_text
-    assert json.loads(result.stdout)["destination"] == str(export_path)
+    assert _payload(result)["destination"] == str(export_path)
 
 
 def test_prompt_inspection_fails_without_persisted_request(tmp_path: Path) -> None:
@@ -94,5 +98,5 @@ def test_prompt_inspection_fails_without_persisted_request(tmp_path: Path) -> No
     )
 
     assert result.exit_code == 1
-    assert json.loads(result.stdout) == {"status": "failed"}
+    assert _payload(result) == {"status": "failed"}
     assert "CLI_PROMPT_NOT_FOUND" in result.stderr

@@ -104,10 +104,23 @@ class CliExitCode(IntEnum):
 
     SUCCESS = 0
     GENERAL_FAILURE = 1
+    INVALID_USAGE = 2
+    CONFIGURATION_FAILURE = 3
     PROJECT_RESOLUTION_FAILURE = 4
     SCAN_FAILURE = 5
     INDEX_FAILURE = 6
+    RETRIEVAL_FAILURE = 7
+    PROMPT_FAILURE = 8
+    PROVIDER_FAILURE = 9
+    PATCH_VALIDATION_FAILURE = 10
+    APPROVAL_REQUIRED = 11
+    PATCH_REJECTED = 12
+    PATCH_APPLICATION_FAILURE = 13
+    PROJECT_STATE_CONFLICT = 14
+    SECURITY_POLICY_REJECTION = 15
+    OPERATION_CANCELLED = 16
     PARTIAL_RESULT = 17
+    UNSUPPORTED_CAPABILITY = 18
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,9 +741,14 @@ class LocalProjectCommandGateway:
             )
         approval = storage.load_active_approval(selected_id)
         if approval is None:
-            return _patch_failure(
+            failed = _patch_failure(
                 "CLI_PATCH_APPROVAL_REQUIRED",
                 "An active Approval Record is required before application.",
+            )
+            return CliCommandResult(
+                failed.data,
+                CliExitCode.APPROVAL_REQUIRED,
+                failed.diagnostics,
             )
         application = LocalStagedPatchApplication(
             root,
@@ -777,7 +795,7 @@ class LocalProjectCommandGateway:
             if applied.status is PatchApplicationStatus.APPLIED
             else CliExitCode.PARTIAL_RESULT
             if applied.status is PatchApplicationStatus.PARTIALLY_APPLIED
-            else CliExitCode.GENERAL_FAILURE
+            else CliExitCode.PATCH_APPLICATION_FAILURE
         )
         return CliCommandResult(data, exit_code, diagnostics)
 
@@ -818,7 +836,7 @@ class LocalProjectCommandGateway:
         )
         return CliCommandResult(
             data,
-            CliExitCode.SUCCESS if not diagnostics else CliExitCode.GENERAL_FAILURE,
+            CliExitCode.SUCCESS if not diagnostics else CliExitCode.CONFIGURATION_FAILURE,
             diagnostics,
         )
 
@@ -832,7 +850,11 @@ class LocalProjectCommandGateway:
         data = runtime_diagnostics(root, explicit)
         return CliCommandResult(
             data,
-            (CliExitCode.SUCCESS if data["status"] == "healthy" else CliExitCode.GENERAL_FAILURE),
+            (
+                CliExitCode.SUCCESS
+                if data["status"] == "healthy"
+                else CliExitCode.CONFIGURATION_FAILURE
+            ),
         )
 
     @staticmethod
@@ -1249,7 +1271,7 @@ def _provider_summary(
 def _provider_failure(code: str, message: str) -> CliCommandResult:
     return CliCommandResult(
         {"status": "failed"},
-        CliExitCode.GENERAL_FAILURE,
+        CliExitCode.PROVIDER_FAILURE,
         (
             {
                 "capability": "provider_inspection",
@@ -1263,7 +1285,7 @@ def _provider_failure(code: str, message: str) -> CliCommandResult:
 def _configuration_failure(code: str, message: str) -> CliCommandResult:
     return CliCommandResult(
         {"status": "failed"},
-        CliExitCode.GENERAL_FAILURE,
+        CliExitCode.CONFIGURATION_FAILURE,
         (
             {
                 "capability": "configuration",
@@ -1376,13 +1398,18 @@ def _patch_workflow_failure(error: Exception) -> CliCommandResult:
 def _patch_application_failure(error: Exception) -> CliCommandResult:
     if isinstance(error, StaleProjectStateError):
         code = "CLI_PATCH_STALE"
+        exit_code = CliExitCode.PROJECT_STATE_CONFLICT
     elif isinstance(error, (PatchApprovalBindingError, PatchApprovalNotFoundError)):
         code = "CLI_PATCH_SECURITY_REJECTED"
+        exit_code = CliExitCode.SECURITY_POLICY_REJECTION
     elif isinstance(error, PatchWorkflowStateError):
         code = "CLI_PATCH_APPROVAL_REQUIRED"
+        exit_code = CliExitCode.APPROVAL_REQUIRED
     else:
         code = "CLI_PATCH_PROPOSAL_NOT_FOUND"
-    return _patch_failure(code, str(error))
+        exit_code = CliExitCode.PATCH_APPLICATION_FAILURE
+    failed = _patch_failure(code, str(error))
+    return CliCommandResult(failed.data, exit_code, failed.diagnostics)
 
 
 def resolve_cli_project(
@@ -1407,7 +1434,20 @@ def resolve_cli_project(
 def render_result(result: CliCommandResult, *, output_format: str | None) -> None:
     """Render requested results to stdout and diagnostics to stderr."""
     if output_format == "json":
-        typer.echo(json.dumps(result.data, ensure_ascii=False, sort_keys=True))
+        status = (
+            "success"
+            if result.exit_code is CliExitCode.SUCCESS
+            else "partial"
+            if result.exit_code is CliExitCode.PARTIAL_RESULT
+            else "failed"
+        )
+        envelope = {
+            "data": result.data,
+            "diagnostics": list(result.diagnostics),
+            "schema_version": "1.0",
+            "status": status,
+        }
+        typer.echo(json.dumps(envelope, ensure_ascii=False, sort_keys=True))
     else:
         for key, value in result.data.items():
             typer.echo(f"{key.replace('_', ' ').title()}: {value}")

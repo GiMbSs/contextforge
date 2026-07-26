@@ -9,11 +9,15 @@ from contextforge.cli.main import app
 runner = CliRunner()
 
 
+def _payload(result: object) -> dict[str, object]:
+    return json.loads(result.stdout)["data"]  # type: ignore[attr-defined,no-any-return]
+
+
 def test_provider_list_reports_configured_capabilities_and_health() -> None:
     result = runner.invoke(app, ["--format", "json", "provider", "list"])
 
     assert result.exit_code == 0
-    providers = json.loads(result.stdout)["providers"]
+    providers = _payload(result)["providers"]
     assert providers == [
         {
             "adapter_id": "mock-deterministic",
@@ -34,7 +38,7 @@ def test_provider_show_omits_credentials_and_reports_capability_profile() -> Non
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["configuration"] == {
         "credentials_exposed": False,
         "default_model": "mock-model",
@@ -49,7 +53,7 @@ def test_provider_health_does_not_require_project_or_transmit_content() -> None:
     result = runner.invoke(app, ["--format", "json", "provider", "health"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["health"] == "healthy"
     assert payload["project_content_transmitted"] is False
     assert payload["provider_id"] == "mock-provider"
@@ -59,7 +63,7 @@ def test_provider_models_only_lists_available_models() -> None:
     result = runner.invoke(app, ["--format", "json", "provider", "models"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _payload(result)
     assert payload["download_triggered"] is False
     assert payload["models"] == [
         {
@@ -76,8 +80,8 @@ def test_unknown_provider_has_stable_failure() -> None:
         ["--format", "json", "provider", "health", "missing-provider"],
     )
 
-    assert result.exit_code == 1
-    assert json.loads(result.stdout) == {"status": "failed"}
+    assert result.exit_code == 9
+    assert _payload(result) == {"status": "failed"}
     assert "CLI_PROVIDER_NOT_FOUND" in result.stderr
 
 
@@ -88,4 +92,4 @@ def test_global_provider_option_selects_optional_provider_commands() -> None:
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["provider_id"] == "mock-provider"
+    assert _payload(result)["provider_id"] == "mock-provider"
