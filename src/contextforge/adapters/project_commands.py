@@ -17,6 +17,7 @@ from contextforge.adapters.filesystem import (
     LocalProjectInitialization,
     LocalProjectScanner,
 )
+from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
 from contextforge.application import (
     AnalysisExecutionPipeline,
     ExecuteTask,
@@ -125,6 +126,15 @@ class ProjectCommandGateway(Protocol):
         self,
         operation: str,
         provider_id: str | None = None,
+    ) -> CliCommandResult: ...
+
+    def inspect_patch(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        proposal_id: str | None = None,
+        destination: Path | None = None,
     ) -> CliCommandResult: ...
 
 
@@ -488,6 +498,65 @@ class LocalProjectCommandGateway:
             "Unknown provider operation.",
         )
 
+    def inspect_patch(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        proposal_id: str | None = None,
+        destination: Path | None = None,
+    ) -> CliCommandResult:
+        storage = LocalPatchProposalStorage(root)
+        if operation == "list":
+            records = storage.list_records()
+            return CliCommandResult(
+                {
+                    "command": "patch list",
+                    "proposals": [_patch_summary(record) for record in records],
+                    "status": "available",
+                }
+            )
+        record = storage.load_record(proposal_id)
+        if record is None:
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        if operation == "show":
+            return CliCommandResult(
+                {
+                    "command": "patch show",
+                    "proposal": record,
+                    "status": "available",
+                }
+            )
+        if operation == "review":
+            return CliCommandResult(
+                {
+                    "command": "patch review",
+                    "review": _patch_review(record),
+                    "status": "available",
+                }
+            )
+        if operation == "export":
+            if destination is not None:
+                destination.write_text(
+                    json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            return CliCommandResult(
+                {
+                    "command": "patch export",
+                    "destination": str(destination) if destination is not None else None,
+                    "proposal": record,
+                    "status": "exported",
+                }
+            )
+        return _patch_failure(
+            "CLI_PATCH_OPERATION_INVALID",
+            "Unknown patch inspection operation.",
+        )
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -844,6 +913,94 @@ def _provider_failure(code: str, message: str) -> CliCommandResult:
         (
             {
                 "capability": "provider_inspection",
+                "code": code,
+                "message": message,
+            },
+        ),
+    )
+
+
+def _patch_summary(record: dict[str, object]) -> dict[str, object]:
+    changes = record.get("changes")
+    lifecycle = record.get("lifecycle")
+    validation = record.get("validation")
+    return {
+        "approval_state": record.get("approval_state"),
+        "change_count": len(changes) if isinstance(changes, list) else 0,
+        "created_at": record.get("created_at"),
+        "lifecycle_state": (lifecycle.get("state") if isinstance(lifecycle, dict) else None),
+        "project_fingerprint": record.get("project_fingerprint"),
+        "proposal_id": record.get("proposal_id"),
+        "summary": record.get("summary"),
+        "validation_state": (validation.get("state") if isinstance(validation, dict) else None),
+    }
+
+
+def _patch_review(record: dict[str, object]) -> dict[str, object]:
+    raw_changes = record.get("changes")
+    changes = raw_changes if isinstance(raw_changes, list) else []
+    reviewed_changes = [_review_change(change) for change in changes if isinstance(change, dict)]
+    validation = record.get("validation")
+    diagnostics = validation.get("diagnostics", []) if isinstance(validation, dict) else []
+    warnings = [
+        diagnostic
+        for diagnostic in diagnostics
+        if isinstance(diagnostic, dict)
+        and diagnostic.get("severity") in ("warning", "error", "critical")
+    ]
+    return {
+        "affected_files": sorted(
+            {
+                str(path)
+                for change in reviewed_changes
+                for path in (change["path"], change["destination_path"])
+                if path is not None
+            }
+        ),
+        "changes": reviewed_changes,
+        "operation_counts": {
+            operation: sum(change["operation"] == operation for change in reviewed_changes)
+            for operation in ("create", "modify", "delete", "rename")
+        },
+        "project_fingerprint": record.get("project_fingerprint"),
+        "proposal_id": record.get("proposal_id"),
+        "state_conflicts": [
+            warning
+            for warning in warnings
+            if "FINGERPRINT" in str(warning.get("code", ""))
+            or "CONSISTENCY" in str(warning.get("code", ""))
+            or "STALE" in str(warning.get("code", ""))
+        ],
+        "validation_state": (validation.get("state") if isinstance(validation, dict) else None),
+        "warnings": warnings,
+    }
+
+
+def _review_change(change: dict[str, object]) -> dict[str, object]:
+    payload = change.get("patch_payload")
+    lines = payload.splitlines() if isinstance(payload, str) else []
+    added = sum(line.startswith("+") and not line.startswith("+++") for line in lines)
+    removed = sum(line.startswith("-") and not line.startswith("---") for line in lines)
+    if lines and added == 0 and removed == 0:
+        added = len(lines)
+    return {
+        "added_lines": added,
+        "change_id": change.get("change_id"),
+        "destination_path": change.get("destination_path"),
+        "explanation": change.get("explanation"),
+        "operation": change.get("operation"),
+        "path": change.get("path"),
+        "removed_lines": removed,
+    }
+
+
+def _patch_failure(code: str, message: str) -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "patch_inspection",
                 "code": code,
                 "message": message,
             },

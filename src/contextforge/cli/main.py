@@ -27,6 +27,8 @@ prompt_app = typer.Typer(help="Inspect safe persisted prompt representations.")
 app.add_typer(prompt_app, name="prompt")
 provider_app = typer.Typer(help="Inspect configured inference providers.")
 app.add_typer(provider_app, name="provider")
+patch_app = typer.Typer(help="Inspect persisted patch proposals.")
+app.add_typer(patch_app, name="patch")
 
 
 def _version_callback(value: bool) -> None:
@@ -358,6 +360,82 @@ def provider_models(
 ) -> None:
     """List available models without downloading any model."""
     _inspect_provider(ctx, "models", provider_id)
+
+
+def _inspect_patch(
+    ctx: typer.Context,
+    operation: str,
+    *,
+    proposal_id: str | None = None,
+    destination: Path | None = None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.inspect_patch(
+        root,
+        operation,
+        proposal_id=proposal_id,
+        destination=destination,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@patch_app.command("list")
+def patch_list(ctx: typer.Context) -> None:
+    """List persisted patch proposals."""
+    _inspect_patch(ctx, "list")
+
+
+@patch_app.command("show")
+def patch_show(
+    ctx: typer.Context,
+    proposal_id: Annotated[
+        str | None,
+        typer.Argument(help="Proposal identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Show one persisted patch proposal."""
+    _inspect_patch(ctx, "show", proposal_id=proposal_id)
+
+
+@patch_app.command("review")
+def patch_review(
+    ctx: typer.Context,
+    proposal_id: Annotated[
+        str | None,
+        typer.Argument(help="Proposal identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Review file changes and validation warnings before approval."""
+    _inspect_patch(ctx, "review", proposal_id=proposal_id)
+
+
+@patch_app.command("export")
+def patch_export(
+    ctx: typer.Context,
+    proposal_id: Annotated[
+        str | None,
+        typer.Argument(help="Proposal identifier; defaults to the latest."),
+    ] = None,
+    destination: Annotated[
+        Path | None,
+        typer.Option("--output", help="Explicit UTF-8 JSON destination."),
+    ] = None,
+) -> None:
+    """Export one persisted patch proposal."""
+    _inspect_patch(
+        ctx,
+        "export",
+        proposal_id=proposal_id,
+        destination=destination,
+    )
 
 
 def main() -> None:
