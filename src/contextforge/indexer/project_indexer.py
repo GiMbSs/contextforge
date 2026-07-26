@@ -55,6 +55,8 @@ from contextforge.scanner import (
     ArtifactClassification,
     ArtifactKind,
     ProjectArtifact,
+    ProjectInventory,
+    ScanStatistics,
 )
 
 INDEX_FORMAT_VERSION = "1"
@@ -74,6 +76,7 @@ class ProjectIndexerConfig:
     max_search_unit_bytes: int = 4_096
     enable_generic_text: bool = True
     index_sensitive_content: bool = False
+    python_ast_strategy_version: str = PYTHON_AST_STRATEGY_VERSION
 
     def __post_init__(self) -> None:
         for value, field_name in (
@@ -88,6 +91,8 @@ class ProjectIndexerConfig:
             raise TypeError("enable_generic_text must be a boolean")
         if type(self.index_sensitive_content) is not bool:
             raise TypeError("index_sensitive_content must be a boolean")
+        if not self.python_ast_strategy_version.strip():
+            raise ValueError("python_ast_strategy_version must not be empty")
 
 
 def _diagnostic(
@@ -119,7 +124,26 @@ def _is_python(artifact: ProjectArtifact) -> bool:
     return language == "python" or artifact.path.parts[-1].casefold().endswith(".py")
 
 
-def _index_id(request: IndexRequest, configuration: ProjectIndexerConfig) -> IndexId:
+def _configuration_fingerprint(configuration: ProjectIndexerConfig) -> str:
+    return f"sha256:{hashlib.sha256(repr(configuration).encode()).hexdigest()}"
+
+
+def _strategy_versions(configuration: ProjectIndexerConfig) -> tuple[str, ...]:
+    return (
+        configuration.python_ast_strategy_version,
+        PYTHON_SYMBOL_STRATEGY_VERSION,
+        PYTHON_RELATIONSHIP_STRATEGY_VERSION,
+        PYTHON_SEARCH_STRATEGY_VERSION,
+        GENERIC_TEXT_STRATEGY_VERSION,
+    )
+
+
+def _index_id(
+    request: IndexRequest,
+    configuration: ProjectIndexerConfig,
+    format_version: str,
+    indexer_version: str,
+) -> IndexId:
     identity = uuid5(
         _INDEX_NAMESPACE,
         ":".join(
@@ -127,14 +151,10 @@ def _index_id(request: IndexRequest, configuration: ProjectIndexerConfig) -> Ind
                 str(request.inventory.project_id),
                 str(request.inventory.inventory_id),
                 str(request.inventory.project_fingerprint),
-                INDEX_FORMAT_VERSION,
-                INDEXER_VERSION,
+                format_version,
+                indexer_version,
                 repr(configuration),
-                PYTHON_AST_STRATEGY_VERSION,
-                PYTHON_SYMBOL_STRATEGY_VERSION,
-                PYTHON_RELATIONSHIP_STRATEGY_VERSION,
-                PYTHON_SEARCH_STRATEGY_VERSION,
-                GENERIC_TEXT_STRATEGY_VERSION,
+                *_strategy_versions(configuration),
             )
         ),
     )
@@ -148,6 +168,14 @@ class DeterministicProjectIndexer:
     source: ProjectSource
     configuration: ProjectIndexerConfig = field(default_factory=ProjectIndexerConfig)
     clock: Callable[[], datetime] = _utc_now
+    format_version: str = INDEX_FORMAT_VERSION
+    indexer_version: str = INDEXER_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.format_version.strip():
+            raise ValueError("format_version must not be empty")
+        if not self.indexer_version.strip():
+            raise ValueError("indexer_version must not be empty")
 
     def index(self, request: IndexRequest) -> ProjectIndex:
         """Index every inventory artifact independently and honestly."""
@@ -305,7 +333,15 @@ class DeterministicProjectIndexer:
             )
         )
         diagnostics_collection = DiagnosticCollection(tuple(diagnostics))
-        has_warnings = bool(diagnostics_collection.diagnostics)
+        has_warnings = any(
+            diagnostic.severity
+            in (
+                DiagnosticSeverity.WARNING,
+                DiagnosticSeverity.ERROR,
+                DiagnosticSeverity.CRITICAL,
+            )
+            for diagnostic in diagnostics_collection
+        )
         status = (
             IndexStatus.INCOMPLETE
             if incomplete
@@ -331,12 +367,17 @@ class DeterministicProjectIndexer:
             fallback_operations=fallback_operations,
         )
         return ProjectIndex(
-            _index_id(request, self.configuration),
+            _index_id(
+                request,
+                self.configuration,
+                self.format_version,
+                self.indexer_version,
+            ),
             inventory.project_id,
             inventory.inventory_id,
             inventory.project_fingerprint,
-            INDEX_FORMAT_VERSION,
-            INDEXER_VERSION,
+            self.format_version,
+            self.indexer_version,
             tuple(indexed_artifacts),
             self.clock(),
             tuple(symbols),
@@ -345,6 +386,249 @@ class DeterministicProjectIndexer:
             diagnostics_collection,
             status,
             measurements,
+            _configuration_fingerprint(self.configuration),
+            _strategy_versions(self.configuration),
+        )
+
+    def update(
+        self,
+        previous_index: ProjectIndex,
+        request: IndexRequest,
+    ) -> ProjectIndex:
+        """Reuse unchanged artifact knowledge and rebuild every affected artifact."""
+        if not isinstance(previous_index, ProjectIndex):
+            raise TypeError("previous_index must be a ProjectIndex")
+        if not isinstance(request, IndexRequest):
+            raise TypeError("request must be an IndexRequest")
+        inventory = request.inventory
+        if not self._is_compatible(previous_index, inventory.project_id):
+            return self.index(request)
+
+        previous_records = {
+            record.artifact_id: record for record in previous_index.indexed_artifacts
+        }
+        reusable_ids = {
+            artifact.artifact_id
+            for artifact in inventory.artifacts
+            if self._can_reuse(artifact, previous_records.get(artifact.artifact_id))
+        }
+        changed_artifacts = tuple(
+            artifact for artifact in inventory.artifacts if artifact.artifact_id not in reusable_ids
+        )
+        changed_index = (
+            self.index(
+                IndexRequest(
+                    ProjectInventory(
+                        inventory.inventory_id,
+                        inventory.project_id,
+                        inventory.project_fingerprint,
+                        changed_artifacts,
+                        ScanStatistics(
+                            artifacts_discovered=len(changed_artifacts),
+                            artifacts_included=len(changed_artifacts),
+                        ),
+                        inventory.discovered_at,
+                        inventory.scanner_version,
+                        inventory.applied_exclusion_rules,
+                        DiagnosticCollection(),
+                        inventory.status,
+                    )
+                )
+            )
+            if changed_artifacts
+            else None
+        )
+        changed_records = (
+            {record.artifact_id: record for record in changed_index.indexed_artifacts}
+            if changed_index is not None
+            else {}
+        )
+        records: list[IndexedArtifact] = []
+        for artifact in inventory.artifacts:
+            changed = changed_records.get(artifact.artifact_id)
+            if changed is not None:
+                records.append(changed)
+                continue
+            previous = previous_records[artifact.artifact_id]
+            records.append(
+                IndexedArtifact(
+                    previous.artifact_id,
+                    previous.state,
+                    previous.strategy,
+                    previous.strategy_version,
+                    inventory.project_fingerprint,
+                    previous.symbol_ids,
+                    previous.relationship_ids,
+                    previous.search_unit_ids,
+                    previous.content_fingerprint,
+                    artifact.path,
+                )
+            )
+
+        symbols = [
+            symbol for symbol in previous_index.symbols if symbol.artifact_id in reusable_ids
+        ]
+        invalidated_symbol_ids = {
+            symbol.symbol_id
+            for symbol in previous_index.symbols
+            if symbol.artifact_id not in reusable_ids
+        }
+        relationships = [
+            relationship
+            for relationship in previous_index.relationships
+            if relationship.location is not None
+            and relationship.location.artifact_id in reusable_ids
+            and relationship.target_reference not in invalidated_symbol_ids
+        ]
+        search_units = [
+            unit for unit in previous_index.search_units if unit.artifact_id in reusable_ids
+        ]
+        if changed_index is not None:
+            symbols.extend(changed_index.symbols)
+            relationships.extend(changed_index.relationships)
+            search_units.extend(changed_index.search_units)
+        symbols.sort(
+            key=lambda item: (
+                item.artifact_id.value,
+                item.location.start_line,
+                item.location.start_column,
+                item.qualified_name or item.name,
+            )
+        )
+        relationships.sort(
+            key=lambda item: (
+                item.source_reference,
+                item.kind.value,
+                item.target_reference,
+                item.relationship_id,
+            )
+        )
+        search_units.sort(
+            key=lambda item: (
+                item.artifact_id.value,
+                item.location.start_line,
+                item.location.start_column,
+                item.order,
+            )
+        )
+
+        reusable_paths = {
+            artifact.path.value
+            for artifact in inventory.artifacts
+            if artifact.artifact_id in reusable_ids
+        }
+        diagnostics = list(inventory.diagnostics)
+        diagnostics.extend(
+            diagnostic
+            for diagnostic in previous_index.diagnostics
+            if diagnostic.location is not None and diagnostic.location.reference in reusable_paths
+        )
+        if changed_index is not None:
+            diagnostics.extend(changed_index.diagnostics)
+        unique_diagnostics = {diagnostic.to_json(): diagnostic for diagnostic in diagnostics}
+        diagnostics_collection = DiagnosticCollection(tuple(unique_diagnostics.values()))
+        incomplete_codes = {
+            "INDEX_ARTIFACT_SIZE_LIMIT",
+            "INDEX_PROJECT_STATE_MISMATCH",
+            "INDEX_PYTHON_SYNTAX_ERROR",
+            "INDEX_SOURCE_UNAVAILABLE",
+            "INDEX_UNSUPPORTED_ENCODING",
+        }
+        incomplete = any(record.state is IndexingState.FAILED for record in records) or any(
+            str(diagnostic.code) in incomplete_codes for diagnostic in diagnostics_collection
+        )
+        has_warnings = any(
+            diagnostic.severity
+            in (
+                DiagnosticSeverity.WARNING,
+                DiagnosticSeverity.ERROR,
+                DiagnosticSeverity.CRITICAL,
+            )
+            for diagnostic in diagnostics_collection
+        )
+        status = (
+            IndexStatus.INCOMPLETE
+            if incomplete
+            else (IndexStatus.COMPLETE_WITH_WARNINGS if has_warnings else IndexStatus.COMPLETE)
+        )
+        metadata_by_id = {
+            artifact.artifact_id: dict(artifact.metadata) for artifact in inventory.artifacts
+        }
+        measurements = IndexMeasurements(
+            artifacts_evaluated=len(records),
+            artifacts_indexed=sum(
+                record.state in (IndexingState.FULLY_INDEXED, IndexingState.PARTIALLY_INDEXED)
+                for record in records
+            ),
+            artifacts_skipped=sum(record.state is IndexingState.SKIPPED for record in records),
+            artifacts_metadata_only=sum(
+                record.state is IndexingState.METADATA_ONLY for record in records
+            ),
+            symbols_extracted=len(symbols),
+            relationships_extracted=len(relationships),
+            search_units_generated=len(search_units),
+            total_indexed_bytes=sum(
+                value
+                for record in records
+                if record.state is IndexingState.FULLY_INDEXED
+                for value in (metadata_by_id[record.artifact_id].get("size_bytes", 0),)
+                if isinstance(value, int)
+            ),
+            parsing_failures=sum(
+                record.state is IndexingState.FAILED and record.strategy == "python-ast"
+                for record in records
+            ),
+            fallback_operations=sum(record.strategy == "generic-text" for record in records),
+            artifacts_reused=len(reusable_ids),
+        )
+        return ProjectIndex(
+            _index_id(
+                request,
+                self.configuration,
+                self.format_version,
+                self.indexer_version,
+            ),
+            inventory.project_id,
+            inventory.inventory_id,
+            inventory.project_fingerprint,
+            self.format_version,
+            self.indexer_version,
+            tuple(records),
+            self.clock(),
+            tuple(symbols),
+            tuple(relationships),
+            tuple(search_units),
+            diagnostics_collection,
+            status,
+            measurements,
+            _configuration_fingerprint(self.configuration),
+            _strategy_versions(self.configuration),
+        )
+
+    def _is_compatible(
+        self,
+        previous_index: ProjectIndex,
+        project_id: ProjectId,
+    ) -> bool:
+        return (
+            previous_index.project_id == project_id
+            and previous_index.format_version == self.format_version
+            and previous_index.indexer_version == self.indexer_version
+            and previous_index.configuration_fingerprint
+            == _configuration_fingerprint(self.configuration)
+            and previous_index.strategy_versions
+            == tuple(sorted(_strategy_versions(self.configuration)))
+        )
+
+    @staticmethod
+    def _can_reuse(
+        artifact: ProjectArtifact,
+        previous: IndexedArtifact | None,
+    ) -> bool:
+        return (
+            previous is not None
+            and previous.path == artifact.path
+            and previous.content_fingerprint == _metadata_fingerprint(artifact)
         )
 
     def _index_python(
@@ -360,8 +644,12 @@ class DeterministicProjectIndexer:
         tuple[SearchUnit, ...],
         tuple[Diagnostic, ...],
     ]:
-        parsed = PythonAstParser().parse(artifact, content)
-        symbol_result = PythonSymbolBuilder().build(parsed)
+        parsed = PythonAstParser(self.configuration.python_ast_strategy_version).parse(
+            artifact, content
+        )
+        symbol_result = PythonSymbolBuilder(
+            ast_strategy_version=self.configuration.python_ast_strategy_version
+        ).build(parsed)
         relationship_result = PythonRelationshipBuilder().build(parsed, symbol_result)
         search_result = PythonSearchUnitBuilder(
             PythonSearchConfig(self.configuration.max_search_unit_bytes)
@@ -370,7 +658,7 @@ class DeterministicProjectIndexer:
             return (
                 IndexingState.FAILED,
                 "python-ast",
-                PYTHON_AST_STRATEGY_VERSION,
+                self.configuration.python_ast_strategy_version,
                 (),
                 (),
                 (),

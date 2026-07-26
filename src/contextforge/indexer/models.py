@@ -183,6 +183,7 @@ class IndexMeasurements:
     total_indexed_bytes: int = 0
     parsing_failures: int = 0
     fallback_operations: int = 0
+    artifacts_reused: int = 0
 
     def __post_init__(self) -> None:
         values = tuple(getattr(self, field_name) for field_name in self.__dataclass_fields__)
@@ -334,6 +335,8 @@ class ProjectIndex:
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
     status: IndexStatus = IndexStatus.COMPLETE
     measurements: IndexMeasurements = field(default_factory=IndexMeasurements)
+    configuration_fingerprint: str | None = None
+    strategy_versions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.index_id, IndexId):
@@ -352,6 +355,17 @@ class ProjectIndex:
             raise TypeError("status must be an IndexStatus")
         if not isinstance(self.measurements, IndexMeasurements):
             raise TypeError("measurements must be IndexMeasurements")
+        if self.configuration_fingerprint is not None and not (
+            self.configuration_fingerprint.startswith("sha256:")
+        ):
+            raise ValueError("configuration_fingerprint must use SHA-256")
+        strategy_versions = tuple(self.strategy_versions)
+        if any(
+            not isinstance(version, str) or not version.strip() for version in strategy_versions
+        ):
+            raise ValueError("strategy_versions must contain non-empty strings")
+        if len(set(strategy_versions)) != len(strategy_versions):
+            raise ValueError("strategy_versions must not contain duplicates")
         if not isinstance(self.created_at, datetime):
             raise TypeError("created_at must be a datetime")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
@@ -379,9 +393,30 @@ class ProjectIndex:
         object.__setattr__(self, "symbols", symbols)
         object.__setattr__(self, "relationships", relationships)
         object.__setattr__(self, "search_units", search_units)
+        object.__setattr__(self, "strategy_versions", tuple(sorted(strategy_versions)))
 
     @staticmethod
     def _require_unique(values: Iterable[str], entity_name: str) -> None:
         normalized = tuple(values)
         if len(set(normalized)) != len(normalized):
             raise ValueError(f"{entity_name} identifiers must be unique")
+
+    def semantically_equivalent_to(self, other: object) -> bool:
+        """Compare authoritative index knowledge, excluding operational metadata."""
+        if not isinstance(other, ProjectIndex):
+            return False
+        return (
+            self.project_id == other.project_id
+            and self.source_inventory_id == other.source_inventory_id
+            and self.project_fingerprint == other.project_fingerprint
+            and self.format_version == other.format_version
+            and self.indexer_version == other.indexer_version
+            and self.indexed_artifacts == other.indexed_artifacts
+            and self.symbols == other.symbols
+            and self.relationships == other.relationships
+            and self.search_units == other.search_units
+            and self.diagnostics == other.diagnostics
+            and self.status is other.status
+            and self.configuration_fingerprint == other.configuration_fingerprint
+            and self.strategy_versions == other.strategy_versions
+        )

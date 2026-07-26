@@ -22,7 +22,12 @@ from contextforge.indexer.models import (
     Symbol,
     SymbolKind,
 )
-from contextforge.indexer.ports import Indexer, IndexStorage, ProjectSource
+from contextforge.indexer.ports import (
+    IncrementalIndexer,
+    Indexer,
+    IndexStorage,
+    ProjectSource,
+)
 from contextforge.indexer.project_indexer import (
     INDEX_FORMAT_VERSION,
     INDEXER_VERSION,
@@ -73,6 +78,7 @@ __all__ = [
     "GenericTextIndexResult",
     "GenericTextIndexer",
     "InMemoryIndexStorage",
+    "IncrementalIndexer",
     "IndexMeasurements",
     "IndexRequest",
     "IndexStatus",

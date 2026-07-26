@@ -15,6 +15,18 @@ class Indexer(Protocol):
         ...
 
 
+class IncrementalIndexer(Indexer, Protocol):
+    """Indexer capable of updating a compatible prior index."""
+
+    def update(
+        self,
+        previous_index: ProjectIndex,
+        request: IndexRequest,
+    ) -> ProjectIndex:
+        """Produce a new index while reusing compatible artifact knowledge."""
+        ...
+
+
 class ProjectSource(Protocol):
     """Authorized content source for artifacts already present in an Inventory."""
 
