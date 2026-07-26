@@ -15,6 +15,7 @@ from contextforge.context.models import (
     ContextStatistics,
     CoverageStatus,
 )
+from contextforge.context.ordering import ContextItemOrderer, ContextOrderingTier
 from contextforge.context.ports import ContextContentSource
 
 __all__ = [
@@ -23,7 +24,9 @@ __all__ = [
     "ContextCoverage",
     "ContextItem",
     "ContextItemMaterializer",
+    "ContextItemOrderer",
     "ContextMaterializationError",
+    "ContextOrderingTier",
     "ContextSection",
     "ContextSectionKind",
     "ContextStatistics",
