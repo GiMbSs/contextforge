@@ -1,5 +1,10 @@
 """Application-layer ports and orchestration contracts."""
 
+from contextforge.application.initialization import (
+    ProjectInitialization,
+    ProjectInitializationPort,
+    ProjectInitializationResult,
+)
 from contextforge.application.messages import (
     ApplicationCommand,
     ApplicationQuery,
@@ -54,6 +59,9 @@ __all__ = [
     "PatchApplicationPreview",
     "PatchApplicationResult",
     "PatchApplicationStatus",
+    "ProjectInitialization",
+    "ProjectInitializationPort",
+    "ProjectInitializationResult",
     "RejectPatchProposal",
     "ScanProject",
 ]
