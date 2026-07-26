@@ -26,6 +26,13 @@ from contextforge.application.context_pipeline import (
     ContextPreparationPipeline,
     ContextPreparationResult,
 )
+from contextforge.application.execution_control import (
+    ExecutionControlError,
+    ExecutionController,
+    ExecutionControlStorage,
+    StageDiagnostics,
+    StageOutcome,
+)
 from contextforge.application.indexing import (
     InventoryNotFoundError,
     InventoryStorage,
@@ -96,6 +103,9 @@ __all__ = [
     "ContextPreparationResult",
     "CurrentProjectState",
     "ExecuteTask",
+    "ExecutionControlError",
+    "ExecutionControlStorage",
+    "ExecutionController",
     "GetContextBundle",
     "GetEffectiveConfiguration",
     "GetPatchProposal",
@@ -134,6 +144,8 @@ __all__ = [
     "ProviderRegistry",
     "RejectPatchProposal",
     "ScanProject",
+    "StageDiagnostics",
+    "StageOutcome",
     "StaleProjectStateError",
     "StructuredPatchEngine",
 ]
