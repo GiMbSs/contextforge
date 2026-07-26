@@ -14,6 +14,11 @@ from uuid import NAMESPACE_URL, uuid5
 
 import typer
 
+from contextforge.adapters.configuration import (
+    inspect_configuration,
+    runtime_diagnostics,
+    set_configuration,
+)
 from contextforge.adapters.filesystem import (
     LocalProjectInitialization,
     LocalProjectScanner,
@@ -178,6 +183,24 @@ class ProjectCommandGateway(Protocol):
         self,
         root: ProjectRoot,
         proposal_id: str,
+    ) -> CliCommandResult: ...
+
+    def configure(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        key: str | None = None,
+        value: str | None = None,
+        explicit: Path | None = None,
+        user_scope: bool = False,
+    ) -> CliCommandResult: ...
+
+    def diagnostics(
+        self,
+        root: ProjectRoot,
+        *,
+        explicit: Path | None = None,
     ) -> CliCommandResult: ...
 
 
@@ -758,6 +781,60 @@ class LocalProjectCommandGateway:
         )
         return CliCommandResult(data, exit_code, diagnostics)
 
+    def configure(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        key: str | None = None,
+        value: str | None = None,
+        explicit: Path | None = None,
+        user_scope: bool = False,
+    ) -> CliCommandResult:
+        """Inspect or safely update local configuration."""
+        if operation == "set":
+            if key is None or value is None:
+                return _configuration_failure(
+                    "CONFIG_ARGUMENT_REQUIRED",
+                    "Configuration key and value are required.",
+                )
+            destination = (
+                Path.home() / ".config" / "contextforge" / "config.toml"
+                if user_scope
+                else root.path / ".contextforge" / "config.toml"
+            )
+            try:
+                return CliCommandResult(set_configuration(destination, key, value))
+            except (TypeError, ValueError, OSError) as error:
+                code = str(error)
+                if not code.startswith("CONFIG_"):
+                    code = "CONFIG_WRITE_FAILED"
+                return _configuration_failure(code, "Configuration was not updated.")
+        data, diagnostics = inspect_configuration(
+            root,
+            operation,
+            key=key,
+            explicit=explicit,
+        )
+        return CliCommandResult(
+            data,
+            CliExitCode.SUCCESS if not diagnostics else CliExitCode.GENERAL_FAILURE,
+            diagnostics,
+        )
+
+    def diagnostics(
+        self,
+        root: ProjectRoot,
+        *,
+        explicit: Path | None = None,
+    ) -> CliCommandResult:
+        """Report runtime readiness without disclosing project content."""
+        data = runtime_diagnostics(root, explicit)
+        return CliCommandResult(
+            data,
+            (CliExitCode.SUCCESS if data["status"] == "healthy" else CliExitCode.GENERAL_FAILURE),
+        )
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -1176,6 +1253,20 @@ def _provider_failure(code: str, message: str) -> CliCommandResult:
         (
             {
                 "capability": "provider_inspection",
+                "code": code,
+                "message": message,
+            },
+        ),
+    )
+
+
+def _configuration_failure(code: str, message: str) -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "configuration",
                 "code": code,
                 "message": message,
             },

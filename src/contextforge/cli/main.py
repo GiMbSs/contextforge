@@ -29,6 +29,8 @@ provider_app = typer.Typer(help="Inspect configured inference providers.")
 app.add_typer(provider_app, name="provider")
 patch_app = typer.Typer(help="Inspect persisted patch proposals.")
 app.add_typer(patch_app, name="patch")
+config_app = typer.Typer(help="Inspect and update effective configuration.")
+app.add_typer(config_app, name="config")
 
 
 def _version_callback(value: bool) -> None:
@@ -584,6 +586,91 @@ def patch_apply(
     if root is None:
         raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
     result = _gateway.apply_patch_proposal(root, proposal_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+def _configure(
+    ctx: typer.Context,
+    operation: str,
+    *,
+    key: str | None = None,
+    value: str | None = None,
+    user_scope: bool = False,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.configure(
+        root,
+        operation,
+        key=key,
+        value=value,
+        explicit=options.config,
+        user_scope=user_scope,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@config_app.command("show")
+def config_show(ctx: typer.Context) -> None:
+    """Show effective configuration with source attribution."""
+    _configure(ctx, "show")
+
+
+@config_app.command("get")
+def config_get(
+    ctx: typer.Context,
+    key: Annotated[str, typer.Argument(help="Canonical dotted configuration key.")],
+) -> None:
+    """Show one effective redacted configuration value."""
+    _configure(ctx, "get", key=key)
+
+
+@config_app.command("set")
+def config_set(
+    ctx: typer.Context,
+    key: Annotated[str, typer.Argument(help="Canonical dotted configuration key.")],
+    value: Annotated[str, typer.Argument(help="TOML scalar or string value.")],
+    user_scope: Annotated[
+        bool,
+        typer.Option("--user", help="Write user configuration instead of project configuration."),
+    ] = False,
+) -> None:
+    """Atomically update one validated non-secret configuration value."""
+    _configure(ctx, "set", key=key, value=value, user_scope=user_scope)
+
+
+@config_app.command("validate")
+def config_validate(ctx: typer.Context) -> None:
+    """Validate configuration syntax, keys, and value types."""
+    _configure(ctx, "validate")
+
+
+@config_app.command("paths")
+def config_paths(ctx: typer.Context) -> None:
+    """Show configuration search paths."""
+    _configure(ctx, "paths")
+
+
+@app.command("diagnostics")
+def diagnostics(ctx: typer.Context) -> None:
+    """Report non-sensitive runtime and project readiness."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.diagnostics(root, explicit=options.config)
     render_result(result, output_format=options.output_format)
     if result.exit_code is not CliExitCode.SUCCESS:
         raise typer.Exit(int(result.exit_code))
