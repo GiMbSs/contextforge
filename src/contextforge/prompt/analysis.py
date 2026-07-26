@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from contextforge.prompt.models import ResponseContract, ResponseFormat
 
@@ -123,3 +125,105 @@ def analysis_response_contract() -> ResponseContract:
         ),
         allow_commentary=False,
     )
+
+
+class AnalysisResponseDecodeError(ValueError):
+    """Provider content does not satisfy the analysis response contract."""
+
+
+def decode_analysis_response(content: str) -> AnalysisResponse:
+    """Decode and validate one JSON analysis response."""
+    if not isinstance(content, str):
+        raise TypeError("content must be a string")
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise AnalysisResponseDecodeError("Analysis response is not valid JSON") from error
+    if not isinstance(payload, dict):
+        raise AnalysisResponseDecodeError("Analysis response must be a JSON object")
+
+    required = {
+        "status",
+        "summary",
+        "findings",
+        "assumptions",
+        "limitations",
+        "diagnostics",
+    }
+    optional = {"uncertainties", "recommended_next_action"}
+    if not required <= set(payload) or not set(payload) <= required | optional:
+        raise AnalysisResponseDecodeError("Analysis response fields do not match the contract")
+
+    status = payload["status"]
+    summary = payload["summary"]
+    findings = payload["findings"]
+    if not isinstance(status, str) or not isinstance(summary, str):
+        raise AnalysisResponseDecodeError("Analysis status and summary must be strings")
+    if not isinstance(findings, list):
+        raise AnalysisResponseDecodeError("Analysis findings must be an array")
+
+    decoded_findings: list[AnalysisFinding] = []
+    for finding in findings:
+        if not isinstance(finding, dict) or not {
+            "finding_id",
+            "statement",
+            "evidence_references",
+        } <= set(finding) <= {
+            "finding_id",
+            "statement",
+            "evidence_references",
+            "confidence",
+        }:
+            raise AnalysisResponseDecodeError("Analysis finding fields do not match the contract")
+        finding_id = finding["finding_id"]
+        statement = finding["statement"]
+        references = finding["evidence_references"]
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(finding_id, str)
+            or not isinstance(statement, str)
+            or not isinstance(references, list)
+            or not all(isinstance(item, str) for item in references)
+            or (
+                confidence is not None
+                and (isinstance(confidence, bool) or not isinstance(confidence, (int, float)))
+            )
+        ):
+            raise AnalysisResponseDecodeError("Analysis finding values have invalid types")
+        decoded_findings.append(
+            AnalysisFinding(
+                finding_id,
+                statement,
+                tuple(cast("list[str]", references)),
+                cast("float | None", confidence),
+            )
+        )
+
+    collections: dict[str, tuple[str, ...]] = {}
+    for field_name in (
+        "assumptions",
+        "limitations",
+        "diagnostics",
+        "uncertainties",
+    ):
+        value = payload.get(field_name, [])
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise AnalysisResponseDecodeError(f"Analysis {field_name} must be an array of strings")
+        collections[field_name] = tuple(cast("list[str]", value))
+    next_action = payload.get("recommended_next_action")
+    if next_action is not None and not isinstance(next_action, str):
+        raise AnalysisResponseDecodeError("recommended_next_action must be a string")
+
+    try:
+        return AnalysisResponse(
+            AnalysisResponseStatus(status),
+            summary,
+            tuple(decoded_findings),
+            collections["assumptions"],
+            collections["limitations"],
+            collections["diagnostics"],
+            collections["uncertainties"],
+            next_action,
+        )
+    except (TypeError, ValueError) as error:
+        raise AnalysisResponseDecodeError(str(error)) from error

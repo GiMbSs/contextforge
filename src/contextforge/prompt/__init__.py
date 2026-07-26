@@ -5,8 +5,10 @@ from contextforge.prompt.analysis import (
     ANALYSIS_RESPONSE_CONTRACT_VERSION,
     AnalysisFinding,
     AnalysisResponse,
+    AnalysisResponseDecodeError,
     AnalysisResponseStatus,
     analysis_response_contract,
+    decode_analysis_response,
 )
 from contextforge.prompt.assembly import (
     CONTEXT_USAGE_RULES,
@@ -54,6 +56,7 @@ __all__ = [
     "SYSTEM_OPERATING_RULES",
     "AnalysisFinding",
     "AnalysisResponse",
+    "AnalysisResponseDecodeError",
     "AnalysisResponseStatus",
     "DeliveryRequirements",
     "InferenceRequest",
@@ -73,5 +76,6 @@ __all__ = [
     "ResponseContract",
     "ResponseFormat",
     "analysis_response_contract",
+    "decode_analysis_response",
     "patch_response_contract",
 ]

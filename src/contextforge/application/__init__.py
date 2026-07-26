@@ -1,5 +1,13 @@
 """Application-layer ports and orchestration contracts."""
 
+from contextforge.application.analysis import (
+    AnalysisExecutionPipeline,
+    AnalysisExecutionResult,
+    AnalysisPipelineError,
+    ContextBundleBuilder,
+    ProviderNotFoundError,
+    ProviderRegistry,
+)
 from contextforge.application.indexing import (
     InventoryNotFoundError,
     InventoryStorage,
@@ -43,6 +51,9 @@ from contextforge.application.preflight import (
 )
 
 __all__ = [
+    "AnalysisExecutionPipeline",
+    "AnalysisExecutionResult",
+    "AnalysisPipelineError",
     "ApplicationCommand",
     "ApplicationPreflightEvidence",
     "ApplicationPreflightResult",
@@ -52,6 +63,7 @@ __all__ = [
     "ApprovePatchProposal",
     "BuildProjectIndex",
     "CheckProviderHealth",
+    "ContextBundleBuilder",
     "ExecuteTask",
     "GetContextBundle",
     "GetEffectiveConfiguration",
@@ -72,6 +84,8 @@ __all__ = [
     "ProjectInitializationPort",
     "ProjectInitializationResult",
     "ProjectScan",
+    "ProviderNotFoundError",
+    "ProviderRegistry",
     "RejectPatchProposal",
     "ScanProject",
 ]

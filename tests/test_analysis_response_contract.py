@@ -1,5 +1,6 @@
 """Tests for the non-patch analysis response contract."""
 
+import json
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -7,9 +8,11 @@ import pytest
 from contextforge.prompt import (
     AnalysisFinding,
     AnalysisResponse,
+    AnalysisResponseDecodeError,
     AnalysisResponseStatus,
     ResponseFormat,
     analysis_response_contract,
+    decode_analysis_response,
 )
 
 
@@ -80,3 +83,47 @@ def test_insufficient_context_requires_an_explanation() -> None:
 def test_analysis_findings_reject_invalid_confidence() -> None:
     with pytest.raises(ValueError, match="between zero and one"):
         AnalysisFinding("finding-1", "Statement", (), 1.1)
+
+
+def test_analysis_response_decoder_validates_nested_findings() -> None:
+    response = decode_analysis_response(
+        json.dumps(
+            {
+                "status": "complete",
+                "summary": "Validated analysis.",
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "statement": "The application delegates through a port.",
+                        "evidence_references": ["item-1"],
+                        "confidence": 0.8,
+                    }
+                ],
+                "assumptions": [],
+                "limitations": ["The project was not executed."],
+                "diagnostics": [],
+            }
+        )
+    )
+
+    assert response.findings[0].evidence_references == ("item-1",)
+    assert response.findings[0].confidence == 0.8
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not-json",
+        "[]",
+        '{"status":"complete"}',
+        (
+            '{"status":"complete","summary":"x","findings":[],"assumptions":[],'
+            '"limitations":[],"diagnostics":[],"unexpected":true}'
+        ),
+    ],
+)
+def test_analysis_response_decoder_rejects_content_outside_contract(
+    content: str,
+) -> None:
+    with pytest.raises(AnalysisResponseDecodeError):
+        decode_analysis_response(content)
