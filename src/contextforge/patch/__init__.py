@@ -14,6 +14,10 @@ from contextforge.patch.models import (
     PatchValidationSummary,
     ProposedChange,
 )
+from contextforge.patch.structured import (
+    StructuredPatchParseError,
+    StructuredPatchParser,
+)
 
 __all__ = [
     "PatchApprovalState",
@@ -25,5 +29,7 @@ __all__ = [
     "ProposedChange",
     "ProviderResponseEnvelopeValidator",
     "ResponseEnvelopeValidationError",
+    "StructuredPatchParseError",
+    "StructuredPatchParser",
     "ValidatedResponseEnvelope",
 ]

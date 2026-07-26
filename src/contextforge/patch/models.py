@@ -9,6 +9,7 @@ from enum import StrEnum
 from contextforge.diagnostics import DiagnosticCode, DiagnosticSeverity
 from contextforge.domain import (
     ArtifactPath,
+    ContentFingerprint,
     InferenceRequestId,
     InferenceResponseId,
     PatchProposalId,
@@ -73,6 +74,7 @@ class ProposedChange:
     patch_payload: str | None = None
     destination_path: ArtifactPath | None = None
     assumptions: tuple[str, ...] = ()
+    expected_old_fingerprint: ContentFingerprint | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.change_id, str) or not self.change_id.strip():
@@ -84,7 +86,7 @@ class ProposedChange:
         if not isinstance(self.explanation, str) or not self.explanation.strip():
             raise ValueError("explanation must not be empty")
         if self.operation in (PatchOperation.CREATE, PatchOperation.MODIFY):
-            if not self.patch_payload:
+            if self.patch_payload is None:
                 raise ValueError("create and modify operations require patch_payload")
         elif self.patch_payload is not None:
             raise ValueError("delete and rename operations must not include patch_payload")
@@ -95,6 +97,10 @@ class ProposedChange:
                 raise ValueError("rename destination must differ from source")
         elif self.destination_path is not None:
             raise ValueError("destination_path is only valid for rename operations")
+        if self.expected_old_fingerprint is not None and not isinstance(
+            self.expected_old_fingerprint, ContentFingerprint
+        ):
+            raise TypeError("expected_old_fingerprint must be a ContentFingerprint")
         assumptions = tuple(self.assumptions)
         if any(not item.strip() for item in assumptions):
             raise ValueError("assumptions must contain non-empty values")
