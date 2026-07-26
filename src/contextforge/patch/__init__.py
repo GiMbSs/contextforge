@@ -18,6 +18,15 @@ from contextforge.patch.structured import (
     StructuredPatchParseError,
     StructuredPatchParser,
 )
+from contextforge.patch.unified import (
+    UnifiedDiff,
+    UnifiedDiffHunk,
+    UnifiedDiffLine,
+    UnifiedDiffLineKind,
+    UnifiedDiffParseError,
+    UnifiedDiffParser,
+    UnifiedFilePatch,
+)
 
 __all__ = [
     "PatchApprovalState",
@@ -31,5 +40,12 @@ __all__ = [
     "ResponseEnvelopeValidationError",
     "StructuredPatchParseError",
     "StructuredPatchParser",
+    "UnifiedDiff",
+    "UnifiedDiffHunk",
+    "UnifiedDiffLine",
+    "UnifiedDiffLineKind",
+    "UnifiedDiffParseError",
+    "UnifiedDiffParser",
+    "UnifiedFilePatch",
     "ValidatedResponseEnvelope",
 ]
