@@ -44,6 +44,7 @@ from contextforge.patch.paths import (
 from contextforge.patch.proposal import (
     PatchProposalMaterialization,
     PatchProposalMaterializer,
+    fingerprint_patch_proposal,
 )
 from contextforge.patch.structured import (
     StructuredPatchParseError,
@@ -98,4 +99,5 @@ __all__ = [
     "UnifiedFilePatch",
     "ValidatedPatchPaths",
     "ValidatedResponseEnvelope",
+    "fingerprint_patch_proposal",
 ]

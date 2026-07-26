@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from contextforge.domain import (
+    FingerprintOrdering,
     InferenceRequestId,
     InferenceResponseId,
     PatchProposalId,
+    ProposalFingerprint,
     TaskId,
+    fingerprint_proposal,
 )
 from contextforge.patch.conflicts import (
     PatchConflictValidationError,
@@ -184,4 +188,46 @@ def _with_change_id(
             change_id,
         )
         for item in diagnostics
+    )
+
+
+def fingerprint_patch_proposal(proposal: PatchProposal) -> ProposalFingerprint:
+    """Fingerprint all immutable proposal content used by approval binding."""
+    if not isinstance(proposal, PatchProposal):
+        raise TypeError("proposal must be a PatchProposal")
+    change_components = tuple(
+        json.dumps(
+            {
+                "assumptions": change.assumptions,
+                "change_id": change.change_id,
+                "destination_path": (
+                    str(change.destination_path) if change.destination_path is not None else None
+                ),
+                "expected_old_fingerprint": (
+                    str(change.expected_old_fingerprint)
+                    if change.expected_old_fingerprint is not None
+                    else None
+                ),
+                "explanation": change.explanation,
+                "operation": change.operation.value,
+                "patch_payload": change.patch_payload,
+                "path": str(change.path),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        for change in proposal.changes
+    )
+    return fingerprint_proposal(
+        (
+            str(proposal.proposal_id),
+            str(proposal.task_id),
+            str(proposal.request_id),
+            str(proposal.response_id),
+            str(proposal.project_fingerprint),
+            proposal.summary or "",
+            *change_components,
+        ),
+        ordering=FingerprintOrdering.ORDERED,
     )

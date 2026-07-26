@@ -7,10 +7,18 @@ from contextforge.application.patches import (
     PatchApplicationResult,
     PatchApplicationStatus,
 )
+from contextforge.application.preflight import (
+    ApplicationPreflightEvidence,
+    ApplicationPreflightResult,
+    PatchApplicationPreflight,
+)
 
 __all__ = [
+    "ApplicationPreflightEvidence",
+    "ApplicationPreflightResult",
     "ApplicationPreviewChange",
     "PatchApplication",
+    "PatchApplicationPreflight",
     "PatchApplicationPreview",
     "PatchApplicationResult",
     "PatchApplicationStatus",
