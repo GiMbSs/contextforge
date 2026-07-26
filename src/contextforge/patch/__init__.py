@@ -14,6 +14,12 @@ from contextforge.patch.models import (
     PatchValidationSummary,
     ProposedChange,
 )
+from contextforge.patch.paths import (
+    PatchPathValidationError,
+    PatchPathValidator,
+    ProtectedPathPolicy,
+    ValidatedPatchPaths,
+)
 from contextforge.patch.structured import (
     StructuredPatchParseError,
     StructuredPatchParser,
@@ -32,10 +38,13 @@ __all__ = [
     "PatchApprovalState",
     "PatchDiagnostic",
     "PatchOperation",
+    "PatchPathValidationError",
+    "PatchPathValidator",
     "PatchProposal",
     "PatchValidationState",
     "PatchValidationSummary",
     "ProposedChange",
+    "ProtectedPathPolicy",
     "ProviderResponseEnvelopeValidator",
     "ResponseEnvelopeValidationError",
     "StructuredPatchParseError",
@@ -47,5 +56,6 @@ __all__ = [
     "UnifiedDiffParseError",
     "UnifiedDiffParser",
     "UnifiedFilePatch",
+    "ValidatedPatchPaths",
     "ValidatedResponseEnvelope",
 ]
