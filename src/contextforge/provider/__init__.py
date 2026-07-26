@@ -1,5 +1,10 @@
 """Provider-independent inference boundary."""
 
+from contextforge.provider.capabilities import (
+    ProviderCapabilityProfile,
+    ProviderExecutionMode,
+    ProviderRequestFeature,
+)
 from contextforge.provider.models import (
     CancellationResult,
     CancellationStatus,
@@ -24,8 +29,10 @@ __all__ = [
     "CancellationStatus",
     "InferenceResponse",
     "ProviderCapabilities",
+    "ProviderCapabilityProfile",
     "ProviderExecutionContext",
     "ProviderExecutionMeasurements",
+    "ProviderExecutionMode",
     "ProviderFinishState",
     "ProviderHealth",
     "ProviderHealthStatus",
@@ -33,6 +40,7 @@ __all__ = [
     "ProviderOperation",
     "ProviderOperationNotSupportedError",
     "ProviderPort",
+    "ProviderRequestFeature",
     "ProviderResponseFormat",
     "ProviderResponseMetadata",
     "ProviderUsage",
