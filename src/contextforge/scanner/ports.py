@@ -1,4 +1,4 @@
-"""Project Scanner port contract."""
+"""Project Scanner port contracts."""
 
 from typing import Protocol
 
@@ -10,4 +10,16 @@ class ProjectScanner(Protocol):
 
     def scan(self, request: ScanRequest) -> ProjectInventory:
         """Produce an immutable Project Inventory."""
+        ...
+
+
+class IncrementalProjectScanner(ProjectScanner, Protocol):
+    """Scanner capable of reusing a compatible prior inventory."""
+
+    def scan(
+        self,
+        request: ScanRequest,
+        previous_inventory: ProjectInventory | None = None,
+    ) -> ProjectInventory:
+        """Produce an inventory while reusing compatible prior artifacts."""
         ...

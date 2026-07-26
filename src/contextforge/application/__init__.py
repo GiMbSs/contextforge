@@ -1,5 +1,11 @@
 """Application-layer ports and orchestration contracts."""
 
+from contextforge.application.indexing import (
+    InventoryNotFoundError,
+    InventoryStorage,
+    ProjectIndexBuild,
+    ProjectScan,
+)
 from contextforge.application.initialization import (
     ProjectInitialization,
     ProjectInitializationPort,
@@ -53,15 +59,19 @@ __all__ = [
     "GetProjectStatus",
     "GetPromptPreview",
     "InitializeProject",
+    "InventoryNotFoundError",
+    "InventoryStorage",
     "ListProviders",
     "PatchApplication",
     "PatchApplicationPreflight",
     "PatchApplicationPreview",
     "PatchApplicationResult",
     "PatchApplicationStatus",
+    "ProjectIndexBuild",
     "ProjectInitialization",
     "ProjectInitializationPort",
     "ProjectInitializationResult",
+    "ProjectScan",
     "RejectPatchProposal",
     "ScanProject",
 ]

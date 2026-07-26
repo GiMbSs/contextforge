@@ -29,7 +29,7 @@ from contextforge.scanner.models import (
     ScanRequest,
     ScanStatistics,
 )
-from contextforge.scanner.ports import ProjectScanner
+from contextforge.scanner.ports import IncrementalProjectScanner, ProjectScanner
 from contextforge.scanner.traversal import (
     ProjectTraversal,
     TraversalEntry,
@@ -54,6 +54,7 @@ __all__ = [
     "IgnorePolicy",
     "IgnoreRule",
     "IgnoreRuleSource",
+    "IncrementalProjectScanner",
     "ProjectArtifact",
     "ProjectInventory",
     "ProjectInventoryBuilder",

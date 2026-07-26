@@ -1,6 +1,6 @@
 """Project Indexer and optional persistence port contracts."""
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from contextforge.domain import IndexId, ProjectId
 from contextforge.indexer.models import IndexRequest, ProjectIndex
@@ -15,6 +15,7 @@ class Indexer(Protocol):
         ...
 
 
+@runtime_checkable
 class IncrementalIndexer(Indexer, Protocol):
     """Indexer capable of updating a compatible prior index."""
 
