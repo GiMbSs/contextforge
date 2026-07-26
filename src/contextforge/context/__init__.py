@@ -17,9 +17,15 @@ from contextforge.context.models import (
 )
 from contextforge.context.ordering import ContextItemOrderer, ContextOrderingTier
 from contextforge.context.ports import ContextContentSource
+from contextforge.context.validation import (
+    ContextBundleValidationResult,
+    ContextBundleValidator,
+)
 
 __all__ = [
     "ContextBundle",
+    "ContextBundleValidationResult",
+    "ContextBundleValidator",
     "ContextContentSource",
     "ContextCoverage",
     "ContextItem",

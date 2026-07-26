@@ -72,12 +72,11 @@ class ContextItemMaterializer:
             raise ContextMaterializationError("Content source returned a different artifact")
 
         expected_fingerprint = selected_item.content_fingerprint
-        if expected_fingerprint is not None:
-            actual_fingerprint = f"sha256:{hashlib.sha256(source.content).hexdigest()}"
-            if actual_fingerprint != expected_fingerprint:
-                raise StaleContextContentError(
-                    f"Selected content is stale: {selected_item.content_reference}"
-                )
+        actual_fingerprint = f"sha256:{hashlib.sha256(source.content).hexdigest()}"
+        if expected_fingerprint is not None and actual_fingerprint != expected_fingerprint:
+            raise StaleContextContentError(
+                f"Selected content is stale: {selected_item.content_reference}"
+            )
 
         text = _decode_source(source.content)
         content = _select_source_span(text, selected_item)
@@ -86,6 +85,7 @@ class ContextItemMaterializer:
             source_reference=source.content_reference,
             content=content,
             source_path=source.path,
+            verified_source_fingerprint=actual_fingerprint,
         )
 
 

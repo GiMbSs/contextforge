@@ -61,6 +61,7 @@ class ContextItem:
     source_reference: str
     content: str
     source_path: ArtifactPath | None = None
+    verified_source_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.selected_item, SelectedContextItem):
@@ -72,6 +73,11 @@ class ContextItem:
             raise TypeError("source_path must be an ArtifactPath")
         if self.selected_item.artifact_id is None and self.source_path is not None:
             raise ValueError("source_path requires an artifact-backed selected item")
+        if self.verified_source_fingerprint is not None and not (
+            self.verified_source_fingerprint.startswith("sha256:")
+            and len(self.verified_source_fingerprint) == 71
+        ):
+            raise ValueError("verified_source_fingerprint must use SHA-256")
 
     @property
     def context_item_id(self) -> str:
