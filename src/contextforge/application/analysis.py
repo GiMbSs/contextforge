@@ -7,21 +7,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from contextforge.application.indexing import (
-    InventoryNotFoundError,
-    InventoryStorage,
-    ProjectIndexBuild,
+from contextforge.application.context_pipeline import (
+    ContextBundleBuilder,
+    ContextPreparationPipeline,
+    merge_diagnostics,
 )
-from contextforge.application.messages import BuildProjectIndex, ExecuteTask
+from contextforge.application.indexing import (
+    InventoryStorage,
+)
+from contextforge.application.messages import ExecuteTask
 from contextforge.context import (
     ContextBundle,
     ContextBundleSerializer,
-    ContextBundleValidator,
 )
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
     InventoryId,
-    ProjectId,
     RequestedOutput,
     new_inference_request_id,
 )
@@ -42,25 +43,7 @@ from contextforge.provider import (
     ProviderFinishState,
     ProviderPort,
 )
-from contextforge.retrieval import (
-    ContextBudget,
-    ContextRetriever,
-    RetrievalRequest,
-    RetrievalResult,
-)
-
-
-class ContextBundleBuilder(Protocol):
-    """Application-facing boundary for validated context construction."""
-
-    def build(
-        self,
-        retrieval_result: RetrievalResult,
-        *,
-        project_id: ProjectId,
-    ) -> ContextBundle:
-        """Build exactly the context selected by retrieval."""
-        ...
+from contextforge.retrieval import ContextBudget, ContextRetriever, RetrievalResult
 
 
 class ProviderRegistry(Protocol):
@@ -93,11 +76,6 @@ class AnalysisExecutionResult:
     diagnostics: DiagnosticCollection
 
 
-def _merge_diagnostics(*collections: DiagnosticCollection) -> DiagnosticCollection:
-    unique = {item.to_json(): item for collection in collections for item in collection}
-    return DiagnosticCollection(tuple(unique.values()))
-
-
 class AnalysisExecutionPipeline:
     """Run the complete read-only analysis flow through injected capability ports."""
 
@@ -120,7 +98,14 @@ class AnalysisExecutionPipeline:
         self._retriever = retriever
         self._context_builder = context_builder
         self._providers = providers
-        self._budget = budget
+        self._context_pipeline = ContextPreparationPipeline(
+            inventory_storage=inventory_storage,
+            index_storage=index_storage,
+            indexer=indexer,
+            retriever=retriever,
+            context_builder=context_builder,
+            budget=budget,
+        )
         self._prompt_limits = prompt_limits or PromptLimits()
         self._clock = clock
 
@@ -131,36 +116,11 @@ class AnalysisExecutionPipeline:
         if command.task.requested_output is not RequestedOutput.ANALYSIS:
             raise AnalysisPipelineError("Analysis pipeline requires analysis output")
 
-        inventory = self._inventory_storage.load_latest(command.project_id)
-        if inventory is None:
-            raise InventoryNotFoundError(str(command.project_id))
-        project_index = self._index_storage.load(command.project_id)
-        if (
-            project_index is None
-            or project_index.source_inventory_id != inventory.inventory_id
-            or project_index.project_fingerprint != inventory.project_fingerprint
-        ):
-            project_index = ProjectIndexBuild(
-                self._indexer,
-                self._inventory_storage,
-                self._index_storage,
-            ).execute(BuildProjectIndex(command.project_id, inventory.inventory_id))
-
-        retrieval = self._retriever.retrieve(
-            RetrievalRequest(command.task, project_index, self._budget)
-        )
-        if (
-            retrieval.task_id != command.task.task_id
-            or retrieval.index_id != project_index.index_id
-        ):
-            raise AnalysisPipelineError("Retriever returned inconsistent traceability")
-
-        bundle = self._context_builder.build(retrieval, project_id=command.project_id)
-        validation = ContextBundleValidator().validate(bundle, retrieval)
-        if not validation.is_valid:
-            raise AnalysisPipelineError("Context Bundle validation failed")
-        if bundle.project_id != command.project_id:
-            raise AnalysisPipelineError("Context Bundle belongs to another project")
+        prepared = self._context_pipeline.prepare(command)
+        inventory = prepared.inventory
+        project_index = prepared.project_index
+        retrieval = prepared.retrieval_result
+        bundle = prepared.context_bundle
 
         contract = analysis_response_contract()
         serialized = ContextBundleSerializer().serialize(bundle)
@@ -175,13 +135,7 @@ class AnalysisExecutionPipeline:
             bundle,
             self._prompt_limits,
         )
-        diagnostics = _merge_diagnostics(
-            inventory.diagnostics,
-            project_index.diagnostics,
-            retrieval.diagnostics,
-            bundle.diagnostics,
-            validation.diagnostics,
-        )
+        diagnostics = prepared.diagnostics
         request = InferenceRequest(
             new_inference_request_id(),
             command.task.task_id,
@@ -224,7 +178,7 @@ class AnalysisExecutionPipeline:
         }
         if not cited_references <= known_references:
             raise AnalysisPipelineError("Analysis cites context outside the Context Bundle")
-        all_diagnostics = _merge_diagnostics(
+        all_diagnostics = merge_diagnostics(
             diagnostics,
             response.diagnostics.collection,
         )

@@ -4,9 +4,14 @@ from contextforge.application.analysis import (
     AnalysisExecutionPipeline,
     AnalysisExecutionResult,
     AnalysisPipelineError,
-    ContextBundleBuilder,
     ProviderNotFoundError,
     ProviderRegistry,
+)
+from contextforge.application.context_pipeline import (
+    ContextBundleBuilder,
+    ContextPreparationError,
+    ContextPreparationPipeline,
+    ContextPreparationResult,
 )
 from contextforge.application.indexing import (
     InventoryNotFoundError,
@@ -37,6 +42,15 @@ from contextforge.application.messages import (
     RejectPatchProposal,
     ScanProject,
 )
+from contextforge.application.patch_pipeline import (
+    PatchProposalExecutionPipeline,
+    PatchProposalExecutionResult,
+    PatchProposalPipelineError,
+    PatchProposalRejectedError,
+    PatchProposalStorage,
+    PatchSourceStateProvider,
+    StructuredPatchEngine,
+)
 from contextforge.application.patches import (
     ApplicationPreviewChange,
     PatchApplication,
@@ -64,6 +78,9 @@ __all__ = [
     "BuildProjectIndex",
     "CheckProviderHealth",
     "ContextBundleBuilder",
+    "ContextPreparationError",
+    "ContextPreparationPipeline",
+    "ContextPreparationResult",
     "ExecuteTask",
     "GetContextBundle",
     "GetEffectiveConfiguration",
@@ -79,6 +96,12 @@ __all__ = [
     "PatchApplicationPreview",
     "PatchApplicationResult",
     "PatchApplicationStatus",
+    "PatchProposalExecutionPipeline",
+    "PatchProposalExecutionResult",
+    "PatchProposalPipelineError",
+    "PatchProposalRejectedError",
+    "PatchProposalStorage",
+    "PatchSourceStateProvider",
     "ProjectIndexBuild",
     "ProjectInitialization",
     "ProjectInitializationPort",
@@ -88,4 +111,5 @@ __all__ = [
     "ProviderRegistry",
     "RejectPatchProposal",
     "ScanProject",
+    "StructuredPatchEngine",
 ]
