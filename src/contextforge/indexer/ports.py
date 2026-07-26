@@ -4,6 +4,7 @@ from typing import Protocol
 
 from contextforge.domain import IndexId, ProjectId
 from contextforge.indexer.models import IndexRequest, ProjectIndex
+from contextforge.scanner import ProjectArtifact
 
 
 class Indexer(Protocol):
@@ -11,6 +12,14 @@ class Indexer(Protocol):
 
     def index(self, request: IndexRequest) -> ProjectIndex:
         """Produce a valid Project Index."""
+        ...
+
+
+class ProjectSource(Protocol):
+    """Authorized content source for artifacts already present in an Inventory."""
+
+    def read(self, artifact: ProjectArtifact) -> bytes:
+        """Return exact artifact bytes without changing project state."""
         ...
 
 

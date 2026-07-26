@@ -10,6 +10,7 @@ from enum import StrEnum
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
     ArtifactId,
+    ArtifactPath,
     IndexId,
     InventoryId,
     ProjectFingerprint,
@@ -140,6 +141,7 @@ class IndexedArtifact:
     relationship_ids: tuple[str, ...] = ()
     search_unit_ids: tuple[str, ...] = ()
     content_fingerprint: str | None = None
+    path: ArtifactPath | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.artifact_id, ArtifactId):
@@ -163,6 +165,31 @@ class IndexedArtifact:
             object.__setattr__(self, field_name, normalized)
         if self.content_fingerprint is not None:
             _require_text(self.content_fingerprint, "content_fingerprint")
+        if self.path is not None and not isinstance(self.path, ArtifactPath):
+            raise TypeError("path must be an ArtifactPath")
+
+
+@dataclass(frozen=True, slots=True)
+class IndexMeasurements:
+    """Operational indexing measurements excluded from semantic identity."""
+
+    artifacts_evaluated: int = 0
+    artifacts_indexed: int = 0
+    artifacts_skipped: int = 0
+    artifacts_metadata_only: int = 0
+    symbols_extracted: int = 0
+    relationships_extracted: int = 0
+    search_units_generated: int = 0
+    total_indexed_bytes: int = 0
+    parsing_failures: int = 0
+    fallback_operations: int = 0
+
+    def __post_init__(self) -> None:
+        values = tuple(getattr(self, field_name) for field_name in self.__dataclass_fields__)
+        if any(type(value) is not int for value in values):
+            raise TypeError("Index measurements must be integers")
+        if any(value < 0 for value in values):
+            raise ValueError("Index measurements must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +272,8 @@ class SearchUnit:
     text: str
     order: int
     symbol_ids: tuple[str, ...] = ()
+    content_fingerprint: str | None = None
+    language: str | None = None
 
     def __post_init__(self) -> None:
         _require_identifier(self.search_unit_id, "search_unit_id")
@@ -267,6 +296,12 @@ class SearchUnit:
             raise ValueError("symbol_ids must not contain duplicates")
         for symbol_id in symbol_ids:
             _require_identifier(symbol_id, "symbol_ids")
+        if self.content_fingerprint is not None:
+            if not self.content_fingerprint.startswith("sha256:"):
+                raise ValueError("content_fingerprint must use SHA-256")
+            _require_text(self.content_fingerprint, "content_fingerprint")
+        if self.language is not None:
+            _require_text(self.language, "language")
         object.__setattr__(self, "symbol_ids", symbol_ids)
 
 
@@ -298,6 +333,7 @@ class ProjectIndex:
     search_units: tuple[SearchUnit, ...] = ()
     diagnostics: DiagnosticCollection = field(default_factory=DiagnosticCollection)
     status: IndexStatus = IndexStatus.COMPLETE
+    measurements: IndexMeasurements = field(default_factory=IndexMeasurements)
 
     def __post_init__(self) -> None:
         if not isinstance(self.index_id, IndexId):
@@ -314,6 +350,8 @@ class ProjectIndex:
             raise TypeError("diagnostics must be a DiagnosticCollection")
         if not isinstance(self.status, IndexStatus):
             raise TypeError("status must be an IndexStatus")
+        if not isinstance(self.measurements, IndexMeasurements):
+            raise TypeError("measurements must be IndexMeasurements")
         if not isinstance(self.created_at, datetime):
             raise TypeError("created_at must be a datetime")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:

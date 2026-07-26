@@ -9,6 +9,7 @@ from contextforge.indexer.generic import (
 from contextforge.indexer.models import (
     IndexedArtifact,
     IndexingState,
+    IndexMeasurements,
     IndexRequest,
     IndexStatus,
     ProjectIndex,
@@ -21,7 +22,14 @@ from contextforge.indexer.models import (
     Symbol,
     SymbolKind,
 )
-from contextforge.indexer.ports import Indexer, IndexStorage
+from contextforge.indexer.ports import Indexer, IndexStorage, ProjectSource
+from contextforge.indexer.project_indexer import (
+    INDEX_FORMAT_VERSION,
+    INDEXER_VERSION,
+    DeterministicProjectIndexer,
+    InMemoryIndexStorage,
+    ProjectIndexerConfig,
+)
 from contextforge.indexer.python_ast import (
     PYTHON_AST_STRATEGY_VERSION,
     PythonAstParser,
@@ -39,20 +47,33 @@ from contextforge.indexer.python_relationships import (
     PythonRelationshipBuilder,
     PythonRelationshipResult,
 )
+from contextforge.indexer.python_search import (
+    PYTHON_SEARCH_STRATEGY_VERSION,
+    PythonSearchConfig,
+    PythonSearchResult,
+    PythonSearchUnitBuilder,
+)
 from contextforge.indexer.python_symbols import (
     PYTHON_SYMBOL_STRATEGY_VERSION,
     PythonSymbolBuilder,
     PythonSymbolResult,
 )
+from contextforge.indexer.query import ProjectIndexQuery
 
 __all__ = [
     "GENERIC_TEXT_STRATEGY_VERSION",
+    "INDEXER_VERSION",
+    "INDEX_FORMAT_VERSION",
     "PYTHON_AST_STRATEGY_VERSION",
     "PYTHON_RELATIONSHIP_STRATEGY_VERSION",
+    "PYTHON_SEARCH_STRATEGY_VERSION",
     "PYTHON_SYMBOL_STRATEGY_VERSION",
+    "DeterministicProjectIndexer",
     "GenericTextIndexConfig",
     "GenericTextIndexResult",
     "GenericTextIndexer",
+    "InMemoryIndexStorage",
+    "IndexMeasurements",
     "IndexRequest",
     "IndexStatus",
     "IndexStorage",
@@ -60,6 +81,9 @@ __all__ = [
     "Indexer",
     "IndexingState",
     "ProjectIndex",
+    "ProjectIndexQuery",
+    "ProjectIndexerConfig",
+    "ProjectSource",
     "PythonAstParser",
     "PythonAstResult",
     "PythonDecorator",
@@ -71,6 +95,9 @@ __all__ = [
     "PythonReference",
     "PythonRelationshipBuilder",
     "PythonRelationshipResult",
+    "PythonSearchConfig",
+    "PythonSearchResult",
+    "PythonSearchUnitBuilder",
     "PythonSymbolBuilder",
     "PythonSymbolResult",
     "Relationship",
