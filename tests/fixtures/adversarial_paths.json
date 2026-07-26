@@ -1,0 +1,86 @@
+{
+  "lexical_cases": [
+    {
+      "category": "parent_traversal",
+      "path": "../outside.py",
+      "expected_code": "PATCH_PATH_OUTSIDE_PROJECT"
+    },
+    {
+      "category": "parent_traversal",
+      "path": "src/../../outside.py",
+      "expected_code": "PATCH_PATH_OUTSIDE_PROJECT"
+    },
+    {
+      "category": "parent_traversal_alternate_separator",
+      "path": "src\\..\\outside.py",
+      "expected_code": "PATCH_PATH_OUTSIDE_PROJECT"
+    },
+    {
+      "category": "absolute_posix",
+      "path": "/etc/passwd",
+      "expected_code": "PATCH_PATH_OUTSIDE_PROJECT"
+    },
+    {
+      "category": "windows_drive",
+      "path": "C:\\Windows\\system.ini",
+      "expected_code": "PATCH_PATH_UNSUPPORTED_DEVICE"
+    },
+    {
+      "category": "windows_drive",
+      "path": "z:/temporary/payload.py",
+      "expected_code": "PATCH_PATH_UNSUPPORTED_DEVICE"
+    },
+    {
+      "category": "unc",
+      "path": "\\\\server\\share\\payload.py",
+      "expected_code": "PATCH_PATH_UNSUPPORTED_DEVICE"
+    },
+    {
+      "category": "device_namespace",
+      "path": "\\\\?\\C:\\project\\payload.py",
+      "expected_code": "PATCH_PATH_UNSUPPORTED_DEVICE"
+    },
+    {
+      "category": "alternate_separator",
+      "path": "src\\package\\module.py",
+      "expected_path": "src/package/module.py"
+    },
+    {
+      "category": "unicode_normalization",
+      "path": "docs/café.txt",
+      "expected_path": "docs/café.txt"
+    },
+    {
+      "category": "protected_directory",
+      "path": ".git/config",
+      "expected_code": "PATCH_PATH_PROTECTED"
+    },
+    {
+      "category": "protected_directory",
+      "path": ".env",
+      "expected_code": "PATCH_PATH_PROTECTED"
+    },
+    {
+      "category": "protected_directory",
+      "path": "secrets/token.txt",
+      "expected_code": "PATCH_PATH_PROTECTED"
+    }
+  ],
+  "rename_cycles": [
+    {
+      "category": "two_node_cycle",
+      "renames": [["a.py", "b.py"], ["b.py", "a.py"]]
+    },
+    {
+      "category": "three_node_cycle",
+      "renames": [["a.py", "b.py"], ["b.py", "c.py"], ["c.py", "a.py"]]
+    }
+  ],
+  "filesystem_cases": [
+    {
+      "category": "symlink_escape",
+      "path": "linked/escape.txt",
+      "expected_code": "PATCH_APPLICATION_FILESYSTEM_FAILURE"
+    }
+  ]
+}
