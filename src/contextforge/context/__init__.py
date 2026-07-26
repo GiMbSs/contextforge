@@ -17,13 +17,22 @@ from contextforge.context.models import (
 )
 from contextforge.context.ordering import ContextItemOrderer, ContextOrderingTier
 from contextforge.context.ports import ContextContentSource
+from contextforge.context.serialization import (
+    CONTEXT_SERIALIZATION_MEDIA_TYPE,
+    CONTEXT_SERIALIZATION_VERSION,
+    ContextBundleSerializer,
+    SerializedContextBundle,
+)
 from contextforge.context.validation import (
     ContextBundleValidationResult,
     ContextBundleValidator,
 )
 
 __all__ = [
+    "CONTEXT_SERIALIZATION_MEDIA_TYPE",
+    "CONTEXT_SERIALIZATION_VERSION",
     "ContextBundle",
+    "ContextBundleSerializer",
     "ContextBundleValidationResult",
     "ContextBundleValidator",
     "ContextContentSource",
@@ -37,6 +46,7 @@ __all__ = [
     "ContextSectionKind",
     "ContextStatistics",
     "CoverageStatus",
+    "SerializedContextBundle",
     "SourceContent",
     "StaleContextContentError",
 ]
