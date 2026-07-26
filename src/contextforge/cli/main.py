@@ -23,6 +23,8 @@ app = typer.Typer(
 _gateway = LocalProjectCommandGateway()
 context_app = typer.Typer(help="Inspect persisted Context Bundles.")
 app.add_typer(context_app, name="context")
+prompt_app = typer.Typer(help="Inspect safe persisted prompt representations.")
+app.add_typer(prompt_app, name="prompt")
 
 
 def _version_callback(value: bool) -> None:
@@ -259,6 +261,49 @@ def context_export(
 ) -> None:
     """Export the latest persisted Context Bundle."""
     _inspect_context(ctx, "export", destination=destination)
+
+
+def _inspect_prompt(
+    ctx: typer.Context,
+    operation: str,
+    *,
+    destination: Path | None = None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.inspect_prompt(root, operation, destination=destination)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@prompt_app.command("preview")
+def prompt_preview(ctx: typer.Context) -> None:
+    """Preview the latest persisted prompt with sensitive content redacted."""
+    _inspect_prompt(ctx, "preview")
+
+
+@prompt_app.command("measure")
+def prompt_measure(ctx: typer.Context) -> None:
+    """Show measurements for the latest persisted prompt."""
+    _inspect_prompt(ctx, "measure")
+
+
+@prompt_app.command("export")
+def prompt_export(
+    ctx: typer.Context,
+    destination: Annotated[
+        Path | None,
+        typer.Option("--output", help="Explicit UTF-8 JSON destination."),
+    ] = None,
+) -> None:
+    """Export the latest safe persisted prompt representation."""
+    _inspect_prompt(ctx, "export", destination=destination)
 
 
 def main() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import IntEnum
@@ -47,6 +48,7 @@ from contextforge.indexer import (
     ProjectIndex,
 )
 from contextforge.project import ProjectRoot, resolve_project_root
+from contextforge.prompt import InferenceRequest
 from contextforge.provider import (
     DeterministicMockProvider,
     MockProviderScenario,
@@ -106,6 +108,14 @@ class ProjectCommandGateway(Protocol):
         operation: str,
         *,
         target: str | None = None,
+        destination: Path | None = None,
+    ) -> CliCommandResult: ...
+
+    def inspect_prompt(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
         destination: Path | None = None,
     ) -> CliCommandResult: ...
 
@@ -240,6 +250,7 @@ class LocalProjectCommandGateway:
         )
         result = pipeline.execute(ExecuteTask(_project_id(root), task, provider_id))
         self._persist_context(root, result.context_bundle)
+        self._persist_prompt(root, result.inference_request)
         return CliCommandResult(
             {
                 "command": "run",
@@ -334,6 +345,60 @@ class LocalProjectCommandGateway:
             )
         return _context_failure("CLI_CONTEXT_OPERATION_INVALID", "Unknown context operation.")
 
+    def inspect_prompt(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        destination: Path | None = None,
+    ) -> CliCommandResult:
+        stored = _load_prompt(root)
+        if stored is None:
+            return _prompt_failure(
+                "CLI_PROMPT_NOT_FOUND",
+                "No persisted prompt preview is available.",
+            )
+        if operation == "preview":
+            return CliCommandResult(
+                {
+                    "command": "prompt preview",
+                    "context_bundle_id": stored["context_bundle_id"],
+                    "delivery_requirements": stored["delivery_requirements"],
+                    "diagnostics": stored["diagnostics"],
+                    "measurements": stored["measurements"],
+                    "prompt_template_version": stored["prompt_template_version"],
+                    "redacted": stored["redacted"],
+                    "request_id": stored["request_id"],
+                    "response_contract": stored["response_contract"],
+                    "sections": stored["sections"],
+                    "status": "available",
+                }
+            )
+        if operation == "measure":
+            return CliCommandResult(
+                {
+                    "command": "prompt measure",
+                    "measurements": stored["measurements"],
+                    "request_id": stored["request_id"],
+                    "status": "available",
+                }
+            )
+        if operation == "export":
+            if destination is not None:
+                destination.write_text(
+                    json.dumps(stored, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            return CliCommandResult(
+                {
+                    "command": "prompt export",
+                    "destination": str(destination) if destination is not None else None,
+                    "prompt": stored,
+                    "status": "exported",
+                }
+            )
+        return _prompt_failure("CLI_PROMPT_OPERATION_INVALID", "Unknown prompt operation.")
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -343,6 +408,24 @@ class LocalProjectCommandGateway:
         payload = _context_payload(bundle)
         temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+
+    @staticmethod
+    def _persist_prompt(root: ProjectRoot, request: InferenceRequest) -> None:
+        execution_directory = root.path / ".contextforge" / "executions"
+        execution_directory.mkdir(parents=True, exist_ok=True)
+        destination = execution_directory / "latest-prompt.json"
+        temporary = execution_directory / "latest-prompt.json.tmp"
+        temporary.write_text(
+            json.dumps(
+                _prompt_payload(request),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         temporary.replace(destination)
@@ -503,6 +586,91 @@ def _load_context(root: ProjectRoot) -> dict[str, object] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
+_PROMPT_SECRET_PATTERN = re.compile(
+    r"\b(password|token|secret|api[_-]?key|credential|authorization)\s*([:=])\s*"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+    flags=re.IGNORECASE,
+)
+_PROMPT_BEARER_PATTERN = re.compile(
+    r"\bbearer\s+[A-Za-z0-9._~+/=-]+",
+    flags=re.IGNORECASE,
+)
+
+
+def _redact_prompt_text(value: str) -> tuple[str, bool]:
+    redacted = _PROMPT_BEARER_PATTERN.sub("Bearer [REDACTED]", value)
+    redacted = _PROMPT_SECRET_PATTERN.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        redacted,
+    )
+    return redacted, redacted != value
+
+
+def _prompt_payload(request: InferenceRequest) -> dict[str, object]:
+    contains_sensitive = request.delivery_requirements.contains_sensitive_context
+    was_redacted = False
+    sections: list[dict[str, object]] = []
+    for message in request.messages:
+        if message.section_id == "serialized-context-bundle" and contains_sensitive:
+            content = "[REDACTED: sensitive project context]"
+            changed = True
+        else:
+            content, changed = _redact_prompt_text(message.content)
+        was_redacted = was_redacted or changed
+        sections.append(
+            {
+                "content": content,
+                "order": message.order,
+                "role": message.role.value,
+                "section_id": message.section_id,
+                "trust": message.trust.value,
+            }
+        )
+    contract = request.response_contract
+    requirements = request.delivery_requirements
+    return {
+        "context_bundle_id": str(request.context_bundle_id),
+        "created_at": request.created_at.isoformat(),
+        "delivery_requirements": {
+            field_name: (list(value) if isinstance(value, tuple) else value)
+            for field_name in requirements.__dataclass_fields__
+            if (value := getattr(requirements, field_name)) is not None
+        },
+        "diagnostics": list(_diagnostics(request.diagnostics)),
+        "measurements": {
+            field_name: getattr(request.measurements, field_name)
+            for field_name in request.measurements.__dataclass_fields__
+        },
+        "prompt_template_version": request.prompt_template_version,
+        "redacted": was_redacted,
+        "request_id": str(request.request_id),
+        "response_contract": {
+            "allow_commentary": contract.allow_commentary,
+            "contract_id": contract.contract_id,
+            "error_behavior": contract.error_behavior,
+            "maximum_response_bytes": contract.maximum_response_bytes,
+            "output_format": contract.output_format.value,
+            "prohibited_operations": list(contract.prohibited_operations),
+            "purpose": contract.purpose,
+            "required_fields": list(contract.required_fields),
+            "response_type": contract.response_type,
+            "validation_instructions": list(contract.validation_instructions),
+            "version": contract.version,
+        },
+        "sections": sections,
+        "task_id": str(request.task_id),
+    }
+
+
+def _load_prompt(root: ProjectRoot) -> dict[str, object] | None:
+    source = root.path / ".contextforge" / "executions" / "latest-prompt.json"
+    try:
+        loaded = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
 def _context_failure(code: str, message: str) -> CliCommandResult:
     return CliCommandResult(
         {"status": "failed"},
@@ -510,6 +678,20 @@ def _context_failure(code: str, message: str) -> CliCommandResult:
         (
             {
                 "capability": "context_inspection",
+                "code": code,
+                "message": message,
+            },
+        ),
+    )
+
+
+def _prompt_failure(code: str, message: str) -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "prompt_inspection",
                 "code": code,
                 "message": message,
             },
