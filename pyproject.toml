@@ -63,6 +63,7 @@ src = ["src", "tests"]
 extend-exclude = [
   "build",
   "dist",
+  "docs",
   "tests/fixtures",
 ]
 
