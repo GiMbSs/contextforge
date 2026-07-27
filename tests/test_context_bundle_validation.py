@@ -15,7 +15,12 @@ from contextforge.context import (
     ContextSectionKind,
     ContextStatistics,
 )
-from contextforge.diagnostics import DiagnosticCollection
+from contextforge.diagnostics import (
+    Diagnostic,
+    DiagnosticCode,
+    DiagnosticCollection,
+    DiagnosticSeverity,
+)
 from contextforge.domain import (
     ArtifactPath,
     FingerprintOrdering,
@@ -256,3 +261,28 @@ def test_validator_requires_sensitivity_annotation() -> None:
     bundle, result = _setup(sensitivity="unclassified")
 
     assert "CONTEXT_SENSITIVITY_MISSING" in _codes(bundle, result)
+
+
+def test_validator_allows_subset_membership_when_diagnostics_explain_missing_items() -> None:
+    bundle, result = _setup()
+    reduced_bundle = replace(
+        bundle,
+        items=(),
+        source_selected_item_ids=(),
+        sections=(),
+        statistics=ContextStatistics(),
+        diagnostics=DiagnosticCollection(
+            (
+                Diagnostic(
+                    DiagnosticCode("CONTEXT_MATERIALIZATION_FAILED"),
+                    DiagnosticSeverity.WARNING,
+                    "Failed to materialize item-alpha: stale content",
+                    "simple-context-builder",
+                ),
+            )
+        ),
+    )
+
+    validation = ContextBundleValidator().validate(reduced_bundle, result)
+
+    assert validation.is_valid

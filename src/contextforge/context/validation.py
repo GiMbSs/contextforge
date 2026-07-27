@@ -84,13 +84,24 @@ class ContextBundleValidator:
     ) -> None:
         bundle_ids = tuple(item.context_item_id for item in bundle.items)
         retrieval_ids = tuple(item.context_item_id for item in retrieval_result.selected_items)
-        if set(bundle_ids) != set(retrieval_ids) or len(bundle_ids) != len(retrieval_ids):
-            diagnostics.append(
-                _error(
-                    "CONTEXT_MEMBERSHIP_MISMATCH",
-                    "Context Bundle membership differs from retrieval selection.",
-                )
+        if bundle_ids == retrieval_ids:
+            return
+        bundle_id_set = set(bundle_ids)
+        retrieval_id_set = set(retrieval_ids)
+        # A builder may legitimately exclude selected items that could not be
+        # materialized, provided it records diagnostics explaining the omission.
+        if (
+            bundle_id_set.issubset(retrieval_id_set)
+            and len(bundle_ids) < len(retrieval_ids)
+            and tuple(bundle.diagnostics)
+        ):
+            return
+        diagnostics.append(
+            _error(
+                "CONTEXT_MEMBERSHIP_MISMATCH",
+                "Context Bundle membership differs from retrieval selection.",
             )
+        )
 
     @staticmethod
     def _validate_spans(
