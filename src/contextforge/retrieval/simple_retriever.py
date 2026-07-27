@@ -61,6 +61,7 @@ class _ScoredCandidate:
     content_reference: str
     location: SourceLocation | None
     estimated_bytes: int
+    estimated_characters: int
     score: int
     path_hits: tuple[str, ...]
     name_hits: tuple[str, ...]
@@ -147,6 +148,7 @@ class SimpleContextRetriever:
                     content_reference=path,
                     location=unit.location,
                     estimated_bytes=len(unit.text.encode("utf-8")),
+                    estimated_characters=len(unit.text),
                     score=score,
                     path_hits=path_hits,
                     name_hits=(),
@@ -184,6 +186,7 @@ class SimpleContextRetriever:
                     content_reference=path,
                     location=symbol.location,
                     estimated_bytes=estimated_bytes,
+                    estimated_characters=len(symbol.signature or symbol.name),
                     score=score,
                     path_hits=path_hits,
                     name_hits=name_hits,
@@ -212,6 +215,7 @@ class SimpleContextRetriever:
                     content_reference=path,
                     location=None,
                     estimated_bytes=estimated_bytes,
+                    estimated_characters=estimated_bytes,
                     score=0,
                     path_hits=(),
                     name_hits=(),
@@ -358,7 +362,7 @@ class SimpleContextRetriever:
             rationale=rationale,
             location=candidate.location,
             estimated_bytes=candidate.estimated_bytes,
-            estimated_characters=candidate.estimated_bytes,
+            estimated_characters=candidate.estimated_characters,
             score_breakdown=self._score_breakdown(candidate),
             content_fingerprint=candidate.content_fingerprint,
             sensitivity_classification="standard",
