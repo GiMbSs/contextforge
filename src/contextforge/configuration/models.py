@@ -114,8 +114,11 @@ class PromptConfig(ConfigModel):
 class ProviderConfig(ConfigModel):
     """Provider selection containing references rather than credential values."""
 
-    provider_id: str = "ollama"
+    provider_id: str = "mock-provider"
     model_id: str | None = None
+    endpoint: str | None = "http://localhost:11434"
+    execution_mode: str = "local"
+    timeout_seconds: float = 30.0
     credential_reference: SecretReference | None = field(default=None, repr=False)
     allow_remote: bool = False
 
@@ -128,6 +131,18 @@ class ProviderConfig(ConfigModel):
             not isinstance(self.model_id, str) or not self.model_id.strip()
         ):
             raise ValueError("model_id must be a non-empty string when provided")
+        if self.endpoint is not None and (
+            not isinstance(self.endpoint, str) or not self.endpoint.strip()
+        ):
+            raise ValueError("endpoint must be a non-empty string when provided")
+        if not isinstance(self.execution_mode, str) or not self.execution_mode.strip():
+            raise ValueError("execution_mode must be a non-empty string")
+        if self.execution_mode not in ("local", "remote"):
+            raise ValueError("execution_mode must be 'local' or 'remote'")
+        if not isinstance(self.timeout_seconds, (int, float)):
+            raise TypeError("timeout_seconds must be numeric")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
         if self.credential_reference is not None and not isinstance(
             self.credential_reference, SecretReference
         ):

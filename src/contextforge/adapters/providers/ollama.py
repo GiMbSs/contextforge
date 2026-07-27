@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from contextforge.provider import (
     ProviderHealth,
@@ -30,6 +30,7 @@ class HttpResponse:
             raise TypeError("body must be bytes")
 
 
+@runtime_checkable
 class OllamaHttpTransport(Protocol):
     """Injected HTTP boundary used by Ollama-compatible adapters."""
 

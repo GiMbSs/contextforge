@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import NAMESPACE_URL, uuid5
 
 import typer
@@ -19,12 +20,14 @@ from contextforge.adapters.configuration import (
     runtime_diagnostics,
     set_configuration,
 )
+from contextforge.adapters.configuration.toml import TomlConfigurationSourceAdapter
 from contextforge.adapters.filesystem import (
     LocalProjectInitialization,
     LocalProjectScanner,
     LocalStagedPatchApplication,
 )
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
+from contextforge.adapters.providers import _DEFAULT_OLLAMA_MODEL, ConfiguredProviderRegistry
 from contextforge.application import (
     AnalysisExecutionPipeline,
     ApplicationPreflightEvidence,
@@ -44,7 +47,12 @@ from contextforge.application import (
     RejectPatchProposal,
     StaleProjectStateError,
 )
-from contextforge.configuration import ScannerConfig
+from contextforge.configuration import (
+    ProjectConfig,
+    ProviderConfig,
+    ScannerConfig,
+    resolve_configuration,
+)
 from contextforge.context import (
     ContextBundle,
     ContextBundleSerializer,
@@ -88,6 +96,7 @@ from contextforge.provider import (
     DeterministicMockProvider,
     MockProviderScenario,
     ProviderCapabilityProfile,
+    ProviderPort,
 )
 from contextforge.retrieval import (
     ContextBudget,
@@ -148,6 +157,7 @@ class ProjectCommandGateway(Protocol):
         root: ProjectRoot,
         task_text: str,
         provider_id: str,
+        explicit_config: Path | None = None,
     ) -> CliCommandResult: ...
 
     def inspect_context(
@@ -171,6 +181,9 @@ class ProjectCommandGateway(Protocol):
         self,
         operation: str,
         provider_id: str | None = None,
+        root: ProjectRoot | None = None,
+        explicit_config: Path | None = None,
+        config: ProviderConfig | None = None,
     ) -> CliCommandResult: ...
 
     def inspect_patch(
@@ -327,6 +340,7 @@ class LocalProjectCommandGateway:
         root: ProjectRoot,
         task_text: str,
         provider_id: str,
+        explicit_config: Path | None = None,
     ) -> CliCommandResult:
         inventory = self._scan(root)
         project_index = DeterministicProjectIndexer(_LocalSource(root.path)).index(
@@ -338,7 +352,7 @@ class LocalProjectCommandGateway:
             indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
             retriever=_EmptyRetriever(),
             context_builder=_EmptyContextBuilder(),
-            providers=_MockProviders(),
+            providers=_provider_registry(root, explicit_config),
             budget=ContextBudget(max_items=20, max_bytes=64_000),
         )
         task = TaskSpecification(
@@ -502,12 +516,20 @@ class LocalProjectCommandGateway:
         self,
         operation: str,
         provider_id: str | None = None,
+        root: ProjectRoot | None = None,
+        explicit_config: Path | None = None,
+        config: ProviderConfig | None = None,
     ) -> CliCommandResult:
-        registry = _MockProviders()
+        provider_config = config or (
+            _load_project_config(root, explicit_config).provider
+            if root is not None
+            else ProviderConfig()
+        )
+        registry = ConfiguredProviderRegistry(provider_config)
         if operation == "list":
             providers = tuple(
-                _provider_summary(registry.get(configured_id))
-                for configured_id in registry.provider_ids()
+                _provider_summary(registry.get(configured_id), provider_config)
+                for configured_id in registry.provider_ids
             )
             return CliCommandResult(
                 {
@@ -516,7 +538,7 @@ class LocalProjectCommandGateway:
                     "status": "available",
                 }
             )
-        selected_id = provider_id or MOCK_PROVIDER_ID
+        selected_id = provider_id or provider_config.provider_id
         provider = registry.get(selected_id)
         if provider is None:
             return _provider_failure(
@@ -524,17 +546,12 @@ class LocalProjectCommandGateway:
                 f"Provider '{selected_id}' is not configured.",
             )
         if operation == "show":
-            capabilities = provider.get_capabilities()
+            capabilities = cast(ProviderCapabilityProfile, provider.get_capabilities())
             return CliCommandResult(
                 {
                     "capabilities": _provider_capabilities(capabilities),
                     "command": "provider show",
-                    "configuration": {
-                        "credentials_exposed": False,
-                        "default_model": MOCK_MODEL_ID,
-                        "endpoint": None,
-                        "provider_id": selected_id,
-                    },
+                    "configuration": _provider_configuration(provider, provider_config),
                     "delivery_policy_status": (
                         "local_only"
                         if capabilities.execution_mode.value == "local"
@@ -984,6 +1001,45 @@ class _MockProviders:
         )
 
 
+def _load_project_config(
+    root: ProjectRoot,
+    explicit: Path | None = None,
+) -> ProjectConfig:
+    """Load the effective project configuration without exposing secrets."""
+    project_path = root.path / ".contextforge" / "config.toml"
+    selected = explicit or project_path
+    source = TomlConfigurationSourceAdapter().load(selected)
+    values = source.values if source.succeeded else {}
+    typed_values = cast("Mapping[object, object]", values)
+    return resolve_configuration(
+        explicit_file=(typed_values if explicit is not None and selected.exists() else None),
+        project=typed_values if explicit is None and selected.exists() else None,
+    ).config
+
+
+def _provider_registry(
+    root: ProjectRoot,
+    explicit: Path | None = None,
+) -> ConfiguredProviderRegistry:
+    """Build the configured provider registry for a project."""
+    return ConfiguredProviderRegistry(_load_project_config(root, explicit).provider)
+
+
+def _provider_configuration(
+    provider: ProviderPort,
+    config: ProviderConfig,
+) -> dict[str, object]:
+    """Return a redacted provider configuration view."""
+    return {
+        "credentials_exposed": False,
+        "default_model": _effective_model_id(provider, config),
+        "endpoint": config.endpoint,
+        "execution_mode": config.execution_mode,
+        "provider_id": config.provider_id,
+        "timeout_seconds": config.timeout_seconds,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _FixedProjectState:
     current: ProjectFingerprint
@@ -1251,21 +1307,32 @@ def _provider_capabilities(
 
 
 def _provider_summary(
-    provider: DeterministicMockProvider | None,
+    provider: ProviderPort | None,
+    config: ProviderConfig,
 ) -> dict[str, object]:
     if provider is None:
         raise RuntimeError("Configured provider registry is inconsistent")
-    capabilities = provider.get_capabilities()
+    capabilities = cast(ProviderCapabilityProfile, provider.get_capabilities())
     health = provider.health_check()
     return {
         "adapter_id": capabilities.adapter_id,
         "context_limit_tokens": capabilities.context_limit_tokens,
-        "default_model": MOCK_MODEL_ID,
+        "default_model": _effective_model_id(provider, config),
         "execution_mode": capabilities.execution_mode.value,
         "health": health.status.value,
         "provider_id": capabilities.provider_id,
         "structured_output_supported": capabilities.structured_output_supported,
     }
+
+
+def _effective_model_id(provider: ProviderPort, config: ProviderConfig) -> str | None:
+    """Return the effective model identifier for presentation."""
+    capabilities = cast(ProviderCapabilityProfile, provider.get_capabilities())
+    if capabilities.provider_id == MOCK_PROVIDER_ID:
+        return MOCK_MODEL_ID
+    if capabilities.provider_id == "ollama-local":
+        return config.model_id or _DEFAULT_OLLAMA_MODEL
+    return config.model_id
 
 
 def _provider_failure(code: str, message: str) -> CliCommandResult:

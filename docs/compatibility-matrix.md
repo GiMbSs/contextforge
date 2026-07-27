@@ -53,11 +53,11 @@ This matrix records the supported runtime combinations for ContextForge 0.1.0.
 | Provider | Status | Notes |
 |----------|--------|-------|
 | mock-provider | Supported | Default, offline, deterministic |
+| Ollama   | Supported | Local and remote HTTP endpoint; requires `contextforge[providers]` |
 | OpenAI   | Not included | Adapter interface ready; no CI validation |
 | Anthropic | Not included | Adapter interface ready; no CI validation |
-| LM Studio | Not included | Local HTTP endpoint; no CI validation |
-| Ollama   | Not included | Local HTTP endpoint; no CI validation |
-| vLLM     | Not included | Local HTTP endpoint; no CI validation |
+| LM Studio | Not included | Adapter interface ready; no CI validation |
+| vLLM     | Not included | Adapter interface ready; no CI validation |
 
 ## Versioning notes
 

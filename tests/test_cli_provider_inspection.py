@@ -42,8 +42,10 @@ def test_provider_show_omits_credentials_and_reports_capability_profile() -> Non
     assert payload["configuration"] == {
         "credentials_exposed": False,
         "default_model": "mock-model",
-        "endpoint": None,
+        "endpoint": "http://localhost:11434",
+        "execution_mode": "local",
         "provider_id": "mock-provider",
+        "timeout_seconds": 30.0,
     }
     assert payload["capabilities"]["adapter_version"] == "1"
     assert payload["delivery_policy_status"] == "local_only"
@@ -93,3 +95,17 @@ def test_global_provider_option_selects_optional_provider_commands() -> None:
 
     assert result.exit_code == 0
     assert _payload(result)["provider_id"] == "mock-provider"
+
+
+def test_provider_show_reports_ollama_configuration() -> None:
+    result = runner.invoke(
+        app,
+        ["--provider", "ollama", "--format", "json", "provider", "show", "ollama"],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["configuration"]["provider_id"] == "ollama"
+    assert payload["configuration"]["endpoint"] == "http://localhost:11434"
+    assert payload["configuration"]["default_model"] == "qwen2.5-coder:7b"
+    assert payload["capabilities"]["provider_id"] == "ollama-local"

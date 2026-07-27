@@ -15,6 +15,7 @@ to external services.
 - Project initialization and state inspection.
 - Scanner, indexer, and analysis-only task execution.
 - Local mock provider for repeatable, offline runs.
+- Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).
 - Patch proposal review with interactive and non-interactive approval.
 - Configuration management with secret redaction and source attribution.
@@ -28,10 +29,16 @@ to external services.
 pip install contextforge-0.1.0-py3-none-any.whl
 ```
 
+For Ollama support, install the `providers` extra:
+
+```bash
+pip install 'contextforge[providers]'
+```
+
 For development, install from source with the `dev` extra:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,providers]"
 ```
 
 ### Quick start

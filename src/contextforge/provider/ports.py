@@ -1,6 +1,6 @@
 """Provider Port boundary."""
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from contextforge.domain import InferenceRequestId
 from contextforge.prompt import InferenceRequest
@@ -14,6 +14,7 @@ from contextforge.provider.models import (
 )
 
 
+@runtime_checkable
 class ProviderPort(Protocol):
     """Execute immutable inference requests through interchangeable adapters."""
 

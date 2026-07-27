@@ -63,6 +63,9 @@ exclude_patterns = [".venv/", "dist/", "*.log"]
 [provider]
 provider_id = "ollama"
 model_id = "qwen2.5-coder:7b"
+endpoint = "http://localhost:11434"
+execution_mode = "local"
+timeout_seconds = 30.0
 ```
 
 Secrets must be referenced, never written as plain text:
@@ -85,18 +88,50 @@ Secret values are redacted in the output.
 ContextForge can talk to an Ollama-compatible local server.
 
 1. Install [Ollama](https://ollama.com).
-2. Pull a model:
+2. Install the optional providers extra:
+
+   ```bash
+   pip install 'contextforge[providers]'
+   ```
+
+3. Pull a model:
 
    ```bash
    ollama pull qwen2.5-coder:7b
    ```
 
-3. Verify connectivity:
+4. Configure the project to use Ollama:
+
+   ```toml
+   [provider]
+   provider_id = "ollama"
+   model_id = "qwen2.5-coder:7b"
+   ```
+
+5. Verify connectivity:
 
    ```bash
    contextforge provider health
    contextforge provider models
    ```
+
+## Remote provider setup
+
+Ollama can also run on a remote host. Set the endpoint explicitly and mark the
+execution mode as remote:
+
+```toml
+[provider]
+provider_id = "ollama"
+model_id = "qwen2.5-coder:7b"
+endpoint = "https://ollama.internal.example.com"
+execution_mode = "remote"
+allow_remote = true
+```
+
+Remote delivery requires explicit authorization and may be restricted by the
+delivery policy. Do not send sensitive project context to a remote provider
+unless your policy explicitly allows it.
 
 ## Scan and index
 
@@ -128,6 +163,10 @@ contextforge run --analysis-only "Explain the retrieval pipeline"
 The task text is preserved exactly as written. ContextForge selects relevant
 context, builds a prompt, invokes the provider, and prints an analysis result.
 No files are modified.
+
+The default provider is the deterministic offline mock. To use Ollama, set
+`provider_id = "ollama"` in `.contextforge/config.toml` or pass
+`--provider ollama` to `contextforge provider` inspection commands.
 
 ## Patch proposal
 

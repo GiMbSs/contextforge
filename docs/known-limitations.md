@@ -6,8 +6,11 @@ This page documents known limitations of ContextForge 0.1.0.
 
 - The default provider is a local mock provider that returns deterministic,
   synthetic results. It is suitable for testing and offline workflows only.
-- Real remote providers (OpenAI, Anthropic, local LM Studio, Ollama, vLLM) are
-  supported by the provider adapter interface but are not validated in CI.
+- Ollama is supported via the `contextforge[providers]` extra and can run in
+  local or remote mode. Live integration against a running Ollama server is not
+  validated in CI.
+- Other providers (OpenAI, Anthropic, LM Studio, vLLM) are supported by the
+  provider adapter interface but are not validated in CI.
 - Provider health checks do not transmit project content; they only verify
   reachability and credentials.
 

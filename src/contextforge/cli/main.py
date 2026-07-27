@@ -13,6 +13,7 @@ from contextforge.adapters.project_commands import (
     resolve_cli_project,
 )
 from contextforge.cli.options import GlobalOptions
+from contextforge.configuration import ProviderConfig
 
 app = typer.Typer(
     name="contextforge",
@@ -207,6 +208,7 @@ def run(
         root,
         task_text,
         options.provider or "mock-provider",
+        options.config,
     )
     render_result(result, output_format=options.output_format)
 
@@ -319,10 +321,31 @@ def _inspect_provider(
 ) -> None:
     options = ctx.ensure_object(GlobalOptions)
     selected_id = provider_id or options.provider
-    result = _gateway.inspect_provider(operation, selected_id)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    config = _provider_config(options)
+    result = _gateway.inspect_provider(
+        operation,
+        selected_id,
+        root,
+        options.config,
+        config,
+    )
     render_result(result, output_format=options.output_format)
     if result.exit_code is not CliExitCode.SUCCESS:
         raise typer.Exit(int(result.exit_code))
+
+
+def _provider_config(options: GlobalOptions) -> ProviderConfig | None:
+    """Override the effective provider configuration from the CLI selection."""
+    if options.provider is None:
+        return None
+    return ProviderConfig(
+        provider_id=options.provider,
+        execution_mode="local",
+    )
 
 
 @provider_app.command("list")
