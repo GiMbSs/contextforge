@@ -23,6 +23,7 @@ from contextforge.context.serialization import (
     ContextBundleSerializer,
     SerializedContextBundle,
 )
+from contextforge.context.filesystem_source import FilesystemContextContentSource
 from contextforge.context.validation import (
     ContextBundleValidationResult,
     ContextBundleValidator,
@@ -36,6 +37,7 @@ __all__ = [
     "ContextBundleValidationResult",
     "ContextBundleValidator",
     "ContextContentSource",
+    "FilesystemContextContentSource",
     "ContextCoverage",
     "ContextItem",
     "ContextItemMaterializer",
