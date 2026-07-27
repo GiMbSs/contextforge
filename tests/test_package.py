@@ -16,14 +16,14 @@ def test_package_imports_and_exposes_version() -> None:
 
 
 def test_version_option_exits_successfully() -> None:
-    result = runner.invoke(app, ["--version"])
+    result = runner.invoke(app, ["--version"], color=False)
 
     assert result.exit_code == 0
     assert result.stdout.strip() == "contextforge 0.1.0"
 
 
 def test_help_option_exits_successfully() -> None:
-    result = runner.invoke(app, ["--help"])
+    result = runner.invoke(app, ["--help"], color=False)
 
     assert result.exit_code == 0
     assert "Build precise, traceable context" in result.stdout
@@ -31,7 +31,7 @@ def test_help_option_exits_successfully() -> None:
 
 
 def test_unknown_command_returns_usage_error() -> None:
-    result = runner.invoke(app, ["unknown-command"])
+    result = runner.invoke(app, ["unknown-command"], color=False)
 
     assert result.exit_code == 2
     assert "No such command" in result.output

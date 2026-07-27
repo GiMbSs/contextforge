@@ -81,10 +81,12 @@ def test_run_rejects_empty_and_non_analysis_execution(tmp_path: Path) -> None:
         app,
         ["--project", str(tmp_path), "run", "--analysis-only", "--stdin"],
         input=" \n",
+        color=False,
     )
     patch_mode = runner.invoke(
         app,
         ["--project", str(tmp_path), "run", "change a file"],
+        color=False,
     )
 
     assert empty.exit_code == 2

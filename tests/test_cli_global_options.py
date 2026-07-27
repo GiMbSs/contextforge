@@ -39,7 +39,7 @@ def test_global_options_are_immutable_raw_parser_output() -> None:
 
 
 def test_help_exposes_every_global_option() -> None:
-    result = runner.invoke(app, ["--help"])
+    result = runner.invoke(app, ["--help"], color=False)
 
     assert result.exit_code == 0
     for option in (
@@ -83,6 +83,7 @@ def test_all_global_options_are_accepted_without_business_resolution() -> None:
             "--no-color",
             "--version",
         ],
+        color=False,
     )
 
     assert result.exit_code == 0
