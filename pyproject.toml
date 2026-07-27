@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-  { name = "ContextForge Contributors" },
+  { name = "Gilberto Neto", email = "gn.dev3@gmail.com" },
 ]
 dependencies = [
   "typer>=0.12,<1.0",
