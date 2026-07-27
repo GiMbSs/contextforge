@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,7 +30,7 @@ class FilesystemContextContentSource:
         try:
             target = self._root.joinpath(*Path(reference).parts).resolve()
             target.relative_to(self._root)
-        except (ValueError, RuntimeError, OSError) as error:
+        except (ValueError, OSError) as error:
             raise ContextMaterializationError(
                 f"Content reference escapes project root: {reference}"
             ) from error
@@ -42,11 +41,6 @@ class FilesystemContextContentSource:
             raise ContextMaterializationError(
                 f"Failed to read content reference: {reference}"
             ) from error
-
-        actual_fingerprint = f"sha256:{hashlib.sha256(content).hexdigest()}"
-        expected_fingerprint = selected_item.content_fingerprint
-        if expected_fingerprint is not None and actual_fingerprint != expected_fingerprint:
-            raise ContextMaterializationError(f"Content fingerprint mismatch for {reference}")
 
         path = self._artifact_path_for(reference, selected_item.artifact_id)
         return SourceContent(

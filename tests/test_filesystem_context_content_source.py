@@ -75,12 +75,21 @@ def test_missing_file_raises_materialization_error(tmp_path: Path) -> None:
         source.read(item)
 
 
-def test_changed_file_raises_materialization_error(tmp_path: Path) -> None:
-    original = b"original content"
-    changed = b"changed content"
-    (tmp_path / "file.py").write_bytes(changed)
+def test_dotdot_reference_raises_materialization_error(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_bytes(b"outside content")
     source = FilesystemContextContentSource(tmp_path)
-    item = _selected_item("file.py", original)
+    item = _selected_item("../outside.txt")
 
-    with pytest.raises(ContextMaterializationError, match="fingerprint"):
+    with pytest.raises(ContextMaterializationError, match="escapes project root"):
+        source.read(item)
+
+
+def test_absolute_reference_raises_materialization_error(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_bytes(b"outside content")
+    source = FilesystemContextContentSource(tmp_path)
+    item = _selected_item(str(outside))
+
+    with pytest.raises(ContextMaterializationError, match="escapes project root"):
         source.read(item)

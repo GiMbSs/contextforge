@@ -1,5 +1,6 @@
 """Context Bundle contracts."""
 
+from contextforge.context.filesystem_source import FilesystemContextContentSource
 from contextforge.context.materialization import (
     ContextItemMaterializer,
     ContextMaterializationError,
@@ -23,7 +24,6 @@ from contextforge.context.serialization import (
     ContextBundleSerializer,
     SerializedContextBundle,
 )
-from contextforge.context.filesystem_source import FilesystemContextContentSource
 from contextforge.context.validation import (
     ContextBundleValidationResult,
     ContextBundleValidator,
@@ -37,7 +37,6 @@ __all__ = [
     "ContextBundleValidationResult",
     "ContextBundleValidator",
     "ContextContentSource",
-    "FilesystemContextContentSource",
     "ContextCoverage",
     "ContextItem",
     "ContextItemMaterializer",
@@ -48,6 +47,7 @@ __all__ = [
     "ContextSectionKind",
     "ContextStatistics",
     "CoverageStatus",
+    "FilesystemContextContentSource",
     "SerializedContextBundle",
     "SourceContent",
     "StaleContextContentError",
