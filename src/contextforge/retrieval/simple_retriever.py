@@ -1,0 +1,457 @@
+"""Minimal deterministic context retriever for analysis-only tasks."""
+
+from __future__ import annotations
+
+import unicodedata
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from contextforge.diagnostics import (
+    Diagnostic,
+    DiagnosticCode,
+    DiagnosticCollection,
+    DiagnosticSeverity,
+)
+from contextforge.domain import ArtifactId, RetrievalId, new_retrieval_id
+from contextforge.indexer import IndexedArtifact, SearchUnit, SourceLocation, Symbol
+from contextforge.retrieval.models import (
+    CandidateEligibility,
+    CandidateOutcome,
+    CandidateType,
+    ContextBudget,
+    RetrievalCandidate,
+    RetrievalEvidence,
+    RetrievalRequest,
+    RetrievalResult,
+    RetrievalStatistics,
+    RetrievalStatus,
+    SelectedContextItem,
+    SelectionDecision,
+    SelectionRationale,
+    SelectionReason,
+)
+from contextforge.retrieval.query import TaskQueryNormalizer
+
+SIMPLE_RETRIEVER_VERSION = "simple-retriever-v1"
+
+
+def _normalize(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
+
+
+def _diagnostic(code: str, message: str) -> Diagnostic:
+    return Diagnostic(
+        DiagnosticCode(code),
+        DiagnosticSeverity.WARNING,
+        message,
+        "simple-context-retriever",
+    )
+
+
+def _unique_hits(keywords: tuple[str, ...], text: str) -> tuple[str, ...]:
+    normalized = _normalize(text)
+    return tuple(keyword for keyword in keywords if keyword in normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class _ScoredCandidate:
+    candidate_id: str
+    candidate_type: CandidateType
+    artifact_id: ArtifactId
+    content_reference: str
+    location: SourceLocation | None
+    estimated_bytes: int
+    score: int
+    path_hits: tuple[str, ...]
+    name_hits: tuple[str, ...]
+    content_hits: tuple[str, ...]
+
+
+class SimpleContextRetriever:
+    """Select context by simple lexical overlap against a project index."""
+
+    def __init__(self, normalizer: TaskQueryNormalizer | None = None) -> None:
+        self._normalizer = normalizer if normalizer is not None else TaskQueryNormalizer()
+        self._version = SIMPLE_RETRIEVER_VERSION
+
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        """Return a deterministic RetrievalResult for the request."""
+        if not isinstance(request, RetrievalRequest):
+            raise TypeError("request must be a RetrievalRequest")
+
+        query = self._normalizer.normalize(request.task)
+        keywords = tuple(
+            term.normalized
+            for term in query.terms
+            if term.kind.value == "keyword" and len(term.normalized) >= 3
+        )
+
+        artifact_by_id = {
+            artifact.artifact_id: artifact for artifact in request.project_index.indexed_artifacts
+        }
+        units_by_artifact: dict[ArtifactId, list[SearchUnit]] = {
+            artifact_id: [] for artifact_id in artifact_by_id
+        }
+        for unit in request.project_index.search_units:
+            units_by_artifact.setdefault(unit.artifact_id, []).append(unit)
+
+        candidates: list[_ScoredCandidate] = []
+        candidates.extend(
+            self._score_search_units(keywords, artifact_by_id, request.project_index.search_units)
+        )
+        candidates.extend(
+            self._score_symbols(
+                keywords, artifact_by_id, units_by_artifact, request.project_index.symbols
+            )
+        )
+
+        if not candidates:
+            return self._empty_result(request)
+
+        candidates.sort(key=lambda item: (-item.score, item.estimated_bytes, item.candidate_id))
+
+        selected, excluded = self._select_under_budget(candidates, request.budget)
+        is_fallback = False
+
+        if not selected and all(item.score == 0 for item in candidates):
+            fallback = self._fallback_candidates(tuple(artifact_by_id.values()), units_by_artifact)
+            selected, excluded = self._select_under_budget(
+                fallback, request.budget, require_positive_score=False
+            )
+            candidates = fallback
+            is_fallback = True
+
+        return self._build_result(request, candidates, selected, excluded, is_fallback)
+
+    def _score_search_units(
+        self,
+        keywords: tuple[str, ...],
+        artifact_by_id: dict[ArtifactId, IndexedArtifact],
+        units: tuple[SearchUnit, ...],
+    ) -> list[_ScoredCandidate]:
+        scored: list[_ScoredCandidate] = []
+        for unit in units:
+            artifact = artifact_by_id.get(unit.artifact_id)
+            if artifact is None:
+                continue
+            path = str(artifact.path) if artifact.path is not None else ""
+            path_hits = _unique_hits(keywords, path)
+            content_hits = _unique_hits(keywords, unit.text)
+            score = 3 * len(path_hits) + len(content_hits)
+            scored.append(
+                _ScoredCandidate(
+                    candidate_id=unit.search_unit_id,
+                    candidate_type=CandidateType.SOURCE_EXCERPT,
+                    artifact_id=unit.artifact_id,
+                    content_reference=path,
+                    location=unit.location,
+                    estimated_bytes=len(unit.text.encode("utf-8")),
+                    score=score,
+                    path_hits=path_hits,
+                    name_hits=(),
+                    content_hits=content_hits,
+                )
+            )
+        return scored
+
+    def _score_symbols(
+        self,
+        keywords: tuple[str, ...],
+        artifact_by_id: dict[ArtifactId, IndexedArtifact],
+        units_by_artifact: dict[ArtifactId, list[SearchUnit]],
+        symbols: tuple[Symbol, ...],
+    ) -> list[_ScoredCandidate]:
+        scored: list[_ScoredCandidate] = []
+        for symbol in symbols:
+            artifact = artifact_by_id.get(symbol.artifact_id)
+            if artifact is None:
+                continue
+            path = str(artifact.path) if artifact.path is not None else ""
+            path_hits = _unique_hits(keywords, path)
+            name_hits = _unique_hits(keywords, symbol.name)
+            content_hits = _unique_hits(keywords, symbol.signature or "")
+            score = 3 * len(path_hits) + 2 * len(name_hits) + len(content_hits)
+            estimated_bytes = self._estimate_artifact_bytes_from_units(
+                units_by_artifact, symbol.artifact_id
+            )
+            scored.append(
+                _ScoredCandidate(
+                    candidate_id=symbol.symbol_id,
+                    candidate_type=CandidateType.SYMBOL_DEFINITION,
+                    artifact_id=symbol.artifact_id,
+                    content_reference=path,
+                    location=symbol.location,
+                    estimated_bytes=estimated_bytes,
+                    score=score,
+                    path_hits=path_hits,
+                    name_hits=name_hits,
+                    content_hits=content_hits,
+                )
+            )
+        return scored
+
+    def _fallback_candidates(
+        self,
+        artifacts: tuple[IndexedArtifact, ...],
+        units_by_artifact: dict[ArtifactId, list[SearchUnit]],
+    ) -> list[_ScoredCandidate]:
+        candidates: list[_ScoredCandidate] = []
+        for artifact in artifacts:
+            path = str(artifact.path) if artifact.path is not None else ""
+            estimated_bytes = self._estimate_artifact_bytes_from_units(
+                units_by_artifact, artifact.artifact_id
+            )
+            candidates.append(
+                _ScoredCandidate(
+                    candidate_id=f"artifact-{artifact.artifact_id}",
+                    candidate_type=CandidateType.FULL_ARTIFACT,
+                    artifact_id=artifact.artifact_id,
+                    content_reference=path,
+                    location=None,
+                    estimated_bytes=estimated_bytes,
+                    score=0,
+                    path_hits=(),
+                    name_hits=(),
+                    content_hits=(),
+                )
+            )
+        candidates.sort(key=lambda item: (item.estimated_bytes, item.candidate_id))
+        return candidates
+
+    def _select_under_budget(
+        self,
+        candidates: list[_ScoredCandidate],
+        budget: ContextBudget,
+        *,
+        require_positive_score: bool = True,
+    ) -> tuple[list[_ScoredCandidate], list[_ScoredCandidate]]:
+        selected: list[_ScoredCandidate] = []
+        excluded: list[_ScoredCandidate] = []
+        used_bytes = 0
+        for candidate in candidates:
+            if require_positive_score and candidate.score <= 0:
+                excluded.append(candidate)
+                continue
+            over_items = budget.max_items is not None and len(selected) >= budget.max_items
+            over_bytes = (
+                budget.max_bytes is not None
+                and used_bytes + candidate.estimated_bytes > budget.max_bytes
+            )
+            if over_items or over_bytes:
+                excluded.append(candidate)
+            else:
+                selected.append(candidate)
+                used_bytes += candidate.estimated_bytes
+        return selected, excluded
+
+    def _build_result(
+        self,
+        request: RetrievalRequest,
+        candidates: list[_ScoredCandidate],
+        selected: list[_ScoredCandidate],
+        excluded: list[_ScoredCandidate],
+        is_fallback: bool = False,
+    ) -> RetrievalResult:
+        retrieval_id = new_retrieval_id()
+
+        retrieval_candidates: list[RetrievalCandidate] = []
+        selected_items: list[SelectedContextItem] = []
+        rationales: list[SelectionRationale] = []
+        artifacts_selected: set[ArtifactId] = set()
+        excerpts = 0
+        symbols = 0
+
+        for rank, candidate in enumerate(selected, start=1):
+            rationale = self._selected_rationale(candidate, rank)
+            retrieval_candidate = self._to_retrieval_candidate(candidate, rationale)
+            retrieval_candidates.append(retrieval_candidate)
+            rationales.append(rationale)
+            selected_items.append(self._to_selected_item(retrieval_id, candidate, rationale))
+            artifacts_selected.add(candidate.artifact_id)
+            if candidate.candidate_type is CandidateType.SOURCE_EXCERPT:
+                excerpts += 1
+            elif candidate.candidate_type is CandidateType.SYMBOL_DEFINITION:
+                symbols += 1
+
+        for candidate in excluded:
+            rationale = self._excluded_rationale(candidate, is_fallback=is_fallback)
+            retrieval_candidates.append(self._to_retrieval_candidate(candidate, rationale))
+            rationales.append(rationale)
+
+        diagnostics: list[Diagnostic] = []
+        if not selected:
+            diagnostics.append(
+                _diagnostic(
+                    "RETRIEVAL_NO_RELEVANT_CONTEXT",
+                    "Simple retriever produced no selected context items.",
+                )
+            )
+
+        return RetrievalResult(
+            retrieval_id=retrieval_id,
+            task_id=request.task.task_id,
+            index_id=request.project_index.index_id,
+            project_fingerprint=request.project_index.project_fingerprint,
+            strategy_versions=(self._version, TaskQueryNormalizer().version),
+            candidates=tuple(retrieval_candidates),
+            selected_items=tuple(selected_items),
+            rationales=tuple(rationales),
+            applied_budget=request.budget,
+            diagnostics=DiagnosticCollection(tuple(diagnostics)),
+            statistics=RetrievalStatistics(
+                candidates_generated=len(candidates),
+                candidates_evaluated=len(candidates),
+                artifacts_selected=len(artifacts_selected),
+                excerpts_selected=excerpts,
+                symbols_selected=symbols,
+                candidates_budget_excluded=sum(
+                    1
+                    for candidate in excluded
+                    if self._excluded_rationale(candidate, is_fallback=is_fallback).primary_reason
+                    is SelectionReason.CONTEXT_BUDGET_EXCEEDED
+                ),
+                estimated_selected_tokens=sum(
+                    item.estimated_tokens or 0 for item in selected_items
+                ),
+            ),
+            status=RetrievalStatus.COMPLETE if selected else RetrievalStatus.INCOMPLETE,
+            created_at=datetime.now(UTC),
+        )
+
+    def _to_retrieval_candidate(
+        self,
+        candidate: _ScoredCandidate,
+        rationale: SelectionRationale,
+    ) -> RetrievalCandidate:
+        return RetrievalCandidate(
+            candidate_id=candidate.candidate_id,
+            candidate_type=candidate.candidate_type,
+            source_reference=candidate.candidate_id,
+            content_reference=candidate.content_reference,
+            evidence=rationale.evidence,
+            eligibility=CandidateEligibility.ELIGIBLE,
+            outcome=CandidateOutcome.SELECTED
+            if rationale.decision is SelectionDecision.SELECTED
+            else CandidateOutcome.EXCLUDED,
+            estimated_bytes=candidate.estimated_bytes,
+            artifact_id=candidate.artifact_id,
+            location=candidate.location,
+            rationale=rationale,
+        )
+
+    def _to_selected_item(
+        self,
+        retrieval_id: RetrievalId,
+        candidate: _ScoredCandidate,
+        rationale: SelectionRationale,
+    ) -> SelectedContextItem:
+        return SelectedContextItem(
+            context_item_id=f"simple-item-{candidate.candidate_id}",
+            candidate_id=candidate.candidate_id,
+            artifact_id=candidate.artifact_id,
+            content_reference=candidate.content_reference,
+            candidate_type=candidate.candidate_type,
+            rationale=rationale,
+            location=candidate.location,
+            estimated_bytes=candidate.estimated_bytes,
+            estimated_characters=candidate.estimated_bytes,
+            score_breakdown=self._score_breakdown(candidate),
+        )
+
+    def _selected_rationale(
+        self,
+        candidate: _ScoredCandidate,
+        rank: int,
+    ) -> SelectionRationale:
+        primary_reason = (
+            SelectionReason.LEXICAL_CONTENT_MATCH
+            if candidate.score > 0
+            else SelectionReason.REQUIRED_CONTEXT
+        )
+        return SelectionRationale(
+            candidate_id=candidate.candidate_id,
+            decision=SelectionDecision.SELECTED,
+            primary_reason=primary_reason,
+            evidence=(self._simple_evidence(candidate),),
+            score=float(candidate.score),
+            rank=rank,
+            explanation="Selected by simple lexical relevance scoring.",
+        )
+
+    def _excluded_rationale(
+        self,
+        candidate: _ScoredCandidate,
+        *,
+        is_fallback: bool = False,
+    ) -> SelectionRationale:
+        if is_fallback or candidate.score > 0:
+            primary_reason = SelectionReason.CONTEXT_BUDGET_EXCEEDED
+            explanation = "Excluded because the candidate does not fit within the Context Budget."
+        else:
+            primary_reason = SelectionReason.BELOW_RELEVANCE_THRESHOLD
+            explanation = "Excluded because the candidate scored no lexical relevance."
+        return SelectionRationale(
+            candidate_id=candidate.candidate_id,
+            decision=SelectionDecision.EXCLUDED,
+            primary_reason=primary_reason,
+            evidence=(self._simple_evidence(candidate),),
+            score=float(candidate.score),
+            explanation=explanation,
+        )
+
+    def _simple_evidence(self, candidate: _ScoredCandidate) -> RetrievalEvidence:
+        detail = (
+            f"score={candidate.score};"
+            f"path_hits={','.join(candidate.path_hits) or 'none'};"
+            f"name_hits={','.join(candidate.name_hits) or 'none'};"
+            f"content_hits={','.join(candidate.content_hits) or 'none'}"
+        )
+        return RetrievalEvidence(
+            evidence_type="simple-lexical",
+            source="retriever",
+            detail=detail,
+            weight=float(candidate.score),
+        )
+
+    def _score_breakdown(
+        self,
+        candidate: _ScoredCandidate,
+    ) -> tuple[tuple[str, float], ...]:
+        return (
+            ("path", float(3 * len(candidate.path_hits))),
+            ("name", float(2 * len(candidate.name_hits))),
+            ("content", float(len(candidate.content_hits))),
+        )
+
+    @staticmethod
+    def _estimate_artifact_bytes_from_units(
+        units_by_artifact: dict[ArtifactId, list[SearchUnit]],
+        artifact_id: ArtifactId,
+    ) -> int:
+        return sum(
+            len(unit.text.encode("utf-8")) for unit in units_by_artifact.get(artifact_id, ())
+        )
+
+    def _empty_result(self, request: RetrievalRequest) -> RetrievalResult:
+        return RetrievalResult(
+            retrieval_id=new_retrieval_id(),
+            task_id=request.task.task_id,
+            index_id=request.project_index.index_id,
+            project_fingerprint=request.project_index.project_fingerprint,
+            strategy_versions=(self._version, TaskQueryNormalizer().version),
+            candidates=(),
+            selected_items=(),
+            rationales=(),
+            applied_budget=request.budget,
+            diagnostics=DiagnosticCollection(
+                (
+                    _diagnostic(
+                        "RETRIEVAL_NO_CANDIDATES",
+                        "Project index contains no retrievable candidates.",
+                    ),
+                )
+            ),
+            statistics=RetrievalStatistics(),
+            status=RetrievalStatus.INCOMPLETE,
+            created_at=datetime.now(UTC),
+        )
