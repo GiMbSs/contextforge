@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from contextforge.cli import GlobalOptions
 from contextforge.cli.main import app
 
-runner = CliRunner()
+runner = CliRunner(env={"NO_COLOR": "1"})
 
 
 def test_global_options_are_immutable_raw_parser_output() -> None:

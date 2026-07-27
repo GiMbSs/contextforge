@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 import contextforge
 from contextforge.cli.main import app
 
-runner = CliRunner()
+runner = CliRunner(env={"NO_COLOR": "1"})
 
 
 def test_package_imports_and_exposes_version() -> None:

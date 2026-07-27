@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from contextforge.cli.main import app
 
-runner = CliRunner()
+runner = CliRunner(env={"NO_COLOR": "1"})
 
 
 @pytest.mark.parametrize("mode", ["argument", "stdin", "file"])
