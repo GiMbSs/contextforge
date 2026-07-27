@@ -59,9 +59,7 @@ def test_adversarial_rename_cycles_are_rejected_once(case: dict[str, object]) ->
         )
         for index, (source, destination) in enumerate(raw_renames)
     )
-    paths = tuple(
-        sorted({ArtifactPath(path) for rename in raw_renames for path in rename})
-    )
+    paths = tuple(sorted({ArtifactPath(path) for rename in raw_renames for path in rename}))
     evidence = PatchConsistencyEvidence(paths, FINGERPRINT, FINGERPRINT)
 
     with pytest.raises(PatchConflictValidationError) as captured:
