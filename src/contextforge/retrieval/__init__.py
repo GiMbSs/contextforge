@@ -73,10 +73,6 @@ from contextforge.retrieval.result import (
     RETRIEVAL_RESULT_ASSEMBLER_VERSION,
     RetrievalResultAssembler,
 )
-from contextforge.retrieval.simple_retriever import (
-    SIMPLE_RETRIEVER_VERSION,
-    SimpleContextRetriever,
-)
 from contextforge.retrieval.scoring import (
     RETRIEVAL_SCORING_MODEL_VERSION,
     CandidateScore,
@@ -85,6 +81,10 @@ from contextforge.retrieval.scoring import (
     RetrievalScoringModel,
     ScoreComponent,
     ScoreContribution,
+)
+from contextforge.retrieval.simple_retriever import (
+    SIMPLE_RETRIEVER_VERSION,
+    SimpleContextRetriever,
 )
 from contextforge.retrieval.structural import (
     STRUCTURAL_RETRIEVAL_STRATEGY_VERSION,
@@ -154,10 +154,10 @@ __all__ = [
     "ScoreComponent",
     "ScoreContribution",
     "SelectedContextItem",
-    "SimpleContextRetriever",
     "SelectionDecision",
     "SelectionRationale",
     "SelectionReason",
+    "SimpleContextRetriever",
     "StructuralRetrievalStrategy",
     "StructuralRole",
     "StructuralSearchResult",
