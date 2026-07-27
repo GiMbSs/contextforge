@@ -65,6 +65,7 @@ class _ScoredCandidate:
     path_hits: tuple[str, ...]
     name_hits: tuple[str, ...]
     content_hits: tuple[str, ...]
+    content_fingerprint: str | None = None
 
 
 class SimpleContextRetriever:
@@ -150,6 +151,7 @@ class SimpleContextRetriever:
                     path_hits=path_hits,
                     name_hits=(),
                     content_hits=content_hits,
+                    content_fingerprint=artifact.content_fingerprint,
                 )
             )
         return scored
@@ -186,6 +188,7 @@ class SimpleContextRetriever:
                     path_hits=path_hits,
                     name_hits=name_hits,
                     content_hits=content_hits,
+                    content_fingerprint=artifact.content_fingerprint,
                 )
             )
         return scored
@@ -213,6 +216,7 @@ class SimpleContextRetriever:
                     path_hits=(),
                     name_hits=(),
                     content_hits=(),
+                    content_fingerprint=artifact.content_fingerprint,
                 )
             )
         candidates.sort(key=lambda item: (item.estimated_bytes, item.candidate_id))
@@ -356,6 +360,8 @@ class SimpleContextRetriever:
             estimated_bytes=candidate.estimated_bytes,
             estimated_characters=candidate.estimated_bytes,
             score_breakdown=self._score_breakdown(candidate),
+            content_fingerprint=candidate.content_fingerprint,
+            sensitivity_classification="standard",
         )
 
     def _selected_rationale(

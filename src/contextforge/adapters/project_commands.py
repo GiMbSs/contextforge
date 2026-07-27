@@ -59,6 +59,7 @@ from contextforge.context import (
     ContextCoverage,
     ContextStatistics,
 )
+from contextforge.context.simple_builder import SimpleContextBuilder
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
     ArtifactPath,
@@ -105,6 +106,7 @@ from contextforge.retrieval import (
     RetrievalStatistics,
     RetrievalStatus,
 )
+from contextforge.retrieval.simple_retriever import SimpleContextRetriever
 from contextforge.scanner import DiscoveryStatus, ProjectArtifact, ProjectInventory, ScanRequest
 
 
@@ -350,8 +352,8 @@ class LocalProjectCommandGateway:
             inventory_storage=_SingleInventoryStorage(inventory),
             index_storage=_SingleIndexStorage(project_index),
             indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
-            retriever=_EmptyRetriever(),
-            context_builder=_EmptyContextBuilder(),
+            retriever=SimpleContextRetriever(),
+            context_builder=SimpleContextBuilder(root.path),
             providers=_provider_registry(root, explicit_config),
             budget=ContextBudget(max_items=20, max_bytes=64_000),
         )
