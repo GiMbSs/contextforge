@@ -17,6 +17,15 @@ from contextforge.prompt.models import PromptMeasurements
 PROMPT_MEASUREMENT_VERSION = "prompt-measurement-v1"
 
 
+def estimate_text_tokens(text: str) -> int:
+    """Estimate text tokens with the canonical conservative approximation."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not text:
+        return 0
+    return max(1, (len(text) * 11 + 39) // 40)
+
+
 @dataclass(frozen=True, slots=True)
 class PromptLimits:
     """Hard request limits resolved before provider invocation."""
@@ -83,7 +92,7 @@ class PromptMeasurer:
             for message in assembly.messages
         )
         character_count = len(complete_payload)
-        estimated_tokens = max(1, (character_count * 11 + 39) // 40)
+        estimated_tokens = estimate_text_tokens(complete_payload)
         sections = {message.section_id: message.content for message in assembly.messages}
         artifact_ids = {
             item.selected_item.artifact_id

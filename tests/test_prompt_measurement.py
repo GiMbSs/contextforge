@@ -31,6 +31,7 @@ from contextforge.prompt import (
     PromptTemplateAssembler,
     PromptTemplateAssembly,
     analysis_response_contract,
+    estimate_text_tokens,
 )
 from contextforge.retrieval import (
     CandidateType,
@@ -167,3 +168,11 @@ def test_strictest_limits_are_all_evaluated() -> None:
         )
 
     assert len(captured.value.diagnostics) == 4
+
+
+def test_canonical_token_estimator_has_explicit_empty_semantics() -> None:
+    assert estimate_text_tokens("") == 0
+    assert estimate_text_tokens("abcd") == 2
+
+    with pytest.raises(TypeError, match="string"):
+        estimate_text_tokens(1)  # type: ignore[arg-type]

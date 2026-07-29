@@ -23,6 +23,7 @@ from contextforge.prompt.measurement import (
     PromptLimitExceededError,
     PromptLimits,
     PromptMeasurer,
+    estimate_text_tokens,
 )
 from contextforge.prompt.models import (
     DeliveryRequirements,
@@ -77,5 +78,6 @@ __all__ = [
     "ResponseFormat",
     "analysis_response_contract",
     "decode_analysis_response",
+    "estimate_text_tokens",
     "patch_response_contract",
 ]

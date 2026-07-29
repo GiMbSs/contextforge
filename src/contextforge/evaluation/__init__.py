@@ -1,5 +1,9 @@
 """Public contracts for deterministic ContextForge evaluations."""
 
+from contextforge.evaluation.context_metrics import (
+    ContextEfficiencyResult,
+    evaluate_context_efficiency,
+)
 from contextforge.evaluation.metrics import (
     artifact_recall,
     complete_evidence_rate,
@@ -22,6 +26,7 @@ from contextforge.evaluation.models import (
 )
 
 __all__ = [
+    "ContextEfficiencyResult",
     "EvaluationCase",
     "EvaluationRunResult",
     "EvaluationSuite",
@@ -32,6 +37,7 @@ __all__ = [
     "StrategySelection",
     "artifact_recall",
     "complete_evidence_rate",
+    "evaluate_context_efficiency",
     "evaluate_retrieval_metrics",
     "has_complete_evidence",
     "normalized_discounted_cumulative_gain",
