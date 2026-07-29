@@ -224,6 +224,15 @@ class ProjectCommandGateway(Protocol):
         destination: Path | None = None,
     ) -> CliCommandResult: ...
 
+    def build_context_packet(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        *,
+        max_items: int = 20,
+        max_bytes: int = 64_000,
+    ) -> CliCommandResult: ...
+
     def inspect_prompt(
         self,
         root: ProjectRoot,
@@ -674,6 +683,39 @@ class LocalProjectCommandGateway:
                 }
             )
         return _context_failure("CLI_CONTEXT_OPERATION_INVALID", "Unknown context operation.")
+
+    def build_context_packet(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        *,
+        max_items: int = 20,
+        max_bytes: int = 64_000,
+    ) -> CliCommandResult:
+        """Build a provider-neutral, read-only context packet for an external agent."""
+        task = TaskSpecification(
+            new_task_id(),
+            task_text,
+            TaskKind.ANALYZE,
+            RequestedOutput.ANALYSIS,
+        )
+        self._scan(root)
+        prepared = ContextPreparationPipeline(
+            inventory_storage=FilesystemInventoryStorage(root),
+            index_storage=FilesystemIndexStorage(root),
+            indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
+            retriever=SimpleContextRetriever(),
+            context_builder=SimpleContextBuilder(root.path),
+            budget=ContextBudget(max_items=max_items, max_bytes=max_bytes),
+        ).prepare(ExecuteTask(_project_id(root), task, "external-agent"))
+        return CliCommandResult(
+            {
+                "command": "context build",
+                "packet": _context_packet(prepared, task_text, max_items, max_bytes),
+                "status": "available",
+            },
+            diagnostics=_diagnostics(prepared.diagnostics),
+        )
 
     def inspect_prompt(
         self,
@@ -2512,6 +2554,71 @@ def _context_payload(bundle: ContextBundle) -> dict[str, object]:
             field_name: getattr(bundle.statistics, field_name)
             for field_name in bundle.statistics.__dataclass_fields__
         },
+    }
+
+
+def _context_packet(
+    prepared: ContextPreparationResult,
+    task_text: str,
+    max_items: int,
+    max_bytes: int,
+) -> dict[str, object]:
+    bundle = prepared.context_bundle
+    selected = {
+        item.context_item_id: item for item in prepared.retrieval_result.selected_items
+    }
+    items: list[dict[str, object]] = []
+    for item in bundle.items:
+        retrieval_item = selected[item.context_item_id]
+        rationale = retrieval_item.rationale
+        items.append(
+            {
+                "content": item.content,
+                "context_item_id": item.context_item_id,
+                "evidence": [
+                    {
+                        "detail": evidence.detail,
+                        "source": evidence.source,
+                        "type": evidence.evidence_type,
+                        "weight": evidence.weight,
+                    }
+                    for evidence in rationale.evidence
+                ],
+                "path": item.source_path.value if item.source_path is not None else None,
+                "primary_reason": rationale.primary_reason.value,
+                "score": rationale.score,
+                "sensitivity": retrieval_item.sensitivity_classification,
+                "source_reference": item.source_reference,
+                "truncated": retrieval_item.is_truncated,
+                "type": retrieval_item.candidate_type.value,
+            }
+        )
+    return {
+        "budget": {"max_bytes": max_bytes, "max_items": max_items},
+        "bundle_id": str(bundle.bundle_id),
+        "coverage": {
+            field_name: getattr(bundle.coverage, field_name).value
+            for field_name in (
+                "targets",
+                "dependencies",
+                "interfaces",
+                "tests",
+                "configuration",
+                "constraints",
+                "error_locations",
+            )
+        }
+        | {"missing_references": list(bundle.coverage.missing_references)},
+        "estimated_context_tokens": bundle.statistics.estimated_tokens,
+        "items": items,
+        "packet_version": "contextforge-agent-context-v1",
+        "project_fingerprint": str(bundle.project_fingerprint),
+        "retrieval_id": str(bundle.retrieval_id),
+        "statistics": {
+            field_name: getattr(bundle.statistics, field_name)
+            for field_name in bundle.statistics.__dataclass_fields__
+        },
+        "task": task_text,
     }
 
 

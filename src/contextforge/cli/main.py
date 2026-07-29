@@ -551,6 +551,50 @@ def context_show(ctx: typer.Context) -> None:
     _inspect_context(ctx, "show")
 
 
+@context_app.command("build")
+def context_build(
+    ctx: typer.Context,
+    task: Annotated[str, typer.Argument(help="Task to enrich with project context.")],
+    max_items: Annotated[
+        int,
+        typer.Option(
+            "--max-items",
+            min=1,
+            max=100,
+            help="Maximum number of selected context items.",
+        ),
+    ] = 20,
+    max_bytes: Annotated[
+        int,
+        typer.Option(
+            "--max-bytes",
+            min=1,
+            max=1_000_000,
+            help="Maximum UTF-8 bytes of selected context.",
+        ),
+    ] = 64_000,
+) -> None:
+    """Build a compact read-only context packet for an external agent."""
+    if not task.strip():
+        raise typer.BadParameter("task input must not be empty")
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.build_context_packet(
+        root,
+        task.strip(),
+        max_items=max_items,
+        max_bytes=max_bytes,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
 @context_app.command("list")
 def context_list(ctx: typer.Context) -> None:
     """List items from the latest persisted Context Bundle."""
