@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
+from contextforge.application.analysis_validation import (
+    AnalysisResponseValidationError,
+    validate_analysis_response,
+)
 from contextforge.application.context_pipeline import (
     ContextBundleBuilder,
     ContextPreparationPipeline,
@@ -43,7 +47,12 @@ from contextforge.provider import (
     ProviderFinishState,
     ProviderPort,
 )
-from contextforge.retrieval import ContextBudget, ContextRetriever, RetrievalResult
+from contextforge.retrieval import (
+    ContextBudget,
+    ContextRetriever,
+    RetrievalResult,
+    RetrievalStatus,
+)
 
 
 class ProviderRegistry(Protocol):
@@ -172,12 +181,15 @@ class AnalysisExecutionPipeline:
             raise AnalysisPipelineError("Provider did not complete the analysis")
 
         analysis = decode_analysis_response(response.content)
-        known_references = {item.context_item_id for item in bundle.items}
-        cited_references = {
-            reference for finding in analysis.findings for reference in finding.evidence_references
-        }
-        if not cited_references <= known_references:
-            raise AnalysisPipelineError("Analysis cites context outside the Context Bundle")
+        try:
+            validate_analysis_response(
+                analysis,
+                known_references=frozenset(item.context_item_id for item in bundle.items),
+                context_complete=retrieval.status
+                in (RetrievalStatus.COMPLETE, RetrievalStatus.COMPLETE_WITH_WARNINGS),
+            )
+        except AnalysisResponseValidationError as error:
+            raise AnalysisPipelineError(str(error)) from error
         all_diagnostics = merge_diagnostics(
             diagnostics,
             response.diagnostics.collection,

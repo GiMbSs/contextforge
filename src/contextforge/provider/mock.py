@@ -286,8 +286,10 @@ class DeterministicMockProvider:
                         "assumptions": [],
                         "diagnostics": [],
                         "findings": [],
-                        "limitations": [],
-                        "status": "complete",
+                        "limitations": [
+                            "The deterministic mock does not inspect supplied context."
+                        ],
+                        "status": "insufficient_context",
                         "summary": "Deterministic mock analysis.",
                     },
                     separators=(",", ":"),

@@ -7,6 +7,10 @@ from contextforge.application.analysis import (
     ProviderNotFoundError,
     ProviderRegistry,
 )
+from contextforge.application.analysis_validation import (
+    AnalysisResponseValidationError,
+    validate_analysis_response,
+)
 from contextforge.application.approval_pipeline import (
     CurrentProjectState,
     PatchApplicationOutcomeUnknownError,
@@ -98,6 +102,7 @@ __all__ = [
     "AnalysisExecutionPipeline",
     "AnalysisExecutionResult",
     "AnalysisPipelineError",
+    "AnalysisResponseValidationError",
     "ApplicationCommand",
     "ApplicationPreflightEvidence",
     "ApplicationPreflightResult",
@@ -166,4 +171,5 @@ __all__ = [
     "StaleProjectStateError",
     "StructuredPatchEngine",
     "assess_execution_recovery",
+    "validate_analysis_response",
 ]

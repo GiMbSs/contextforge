@@ -119,7 +119,7 @@ def analysis_response_contract() -> ResponseContract:
             "when the supplied context cannot support the analysis."
         ),
         validation_instructions=(
-            "Every finding must cite zero or more supplied context references.",
+            "Every finding must cite one or more supplied context references.",
             "Do not claim that project files were modified.",
             "Represent uncertainty and assumptions explicitly.",
         ),
