@@ -25,6 +25,8 @@ development are recorded in the Unreleased section.
   proposal result instead of relying on reusable task identity.
 - Added idempotent patch authorization and application replay handling, plus
   execution reconciliation after interrupted approval or application commits.
+- Added a durable pre-mutation application journal that blocks automatic retry
+  when a submitted patch application has no persisted outcome.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

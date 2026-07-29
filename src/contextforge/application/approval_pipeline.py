@@ -66,6 +66,20 @@ class PatchWorkflowStorage(Protocol):
         """Load approval evidence by its exact identifier."""
         ...
 
+    def application_attempt_started(self, proposal_id: PatchProposalId) -> bool:
+        """Whether an application attempt was durably submitted."""
+        ...
+
+    def begin_application_attempt(
+        self,
+        proposal_id: PatchProposalId,
+        approval_id: ApprovalId,
+        proposal_fingerprint: ProposalFingerprint,
+        started_at: datetime,
+    ) -> None:
+        """Persist application intent before project mutation starts."""
+        ...
+
     def save_application_result(self, result: PatchApplicationResult) -> None:
         """Persist the outcome of every application attempt."""
         ...
@@ -101,6 +115,10 @@ class StaleProjectStateError(PatchWorkflowError):
 
 class PatchApprovalBindingError(PatchWorkflowError):
     """Approval is not bound to the exact selected proposal and state."""
+
+
+class PatchApplicationOutcomeUnknownError(PatchWorkflowError):
+    """An earlier application was submitted without a durable outcome."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +222,10 @@ class PatchApprovalApplicationPipeline:
         approval = self._storage.load_approval(command.approval_id)
         if approval is None:
             raise PatchApprovalNotFoundError(str(command.approval_id))
+        if self._storage.application_attempt_started(proposal.proposal_id):
+            raise PatchApplicationOutcomeUnknownError(
+                "A previous patch application outcome is unknown"
+            )
 
         proposal_fingerprint = fingerprint_patch_proposal(proposal)
         current_project = self._require_current_project(
@@ -220,6 +242,12 @@ class PatchApprovalApplicationPipeline:
         except ApprovalBindingError as error:
             raise PatchApprovalBindingError(str(error)) from error
 
+        self._storage.begin_application_attempt(
+            proposal.proposal_id,
+            approval.approval_id,
+            proposal_fingerprint,
+            self._clock(),
+        )
         application = self._application.apply_proposal(
             proposal,
             proposal_fingerprint,

@@ -9,6 +9,7 @@ from contextforge.application.analysis import (
 )
 from contextforge.application.approval_pipeline import (
     CurrentProjectState,
+    PatchApplicationOutcomeUnknownError,
     PatchApplyResult,
     PatchApprovalApplicationPipeline,
     PatchApprovalBindingError,
@@ -123,6 +124,7 @@ __all__ = [
     "InventoryStorage",
     "ListProviders",
     "PatchApplication",
+    "PatchApplicationOutcomeUnknownError",
     "PatchApplicationPreflight",
     "PatchApplicationPreview",
     "PatchApplicationResult",

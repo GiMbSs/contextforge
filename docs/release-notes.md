@@ -32,6 +32,8 @@ workflows for building precise, traceable LLM context from a software project.
   proposal materialization before explicit approval.
 - Crash-safe reconciliation between persisted proposal lifecycles and execution
   stages, with idempotent repeated approval, rejection, and application.
+- Durable patch-application submission journaling that prevents unsafe replay
+  after an interrupted mutation with an unknown outcome.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

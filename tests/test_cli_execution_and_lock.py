@@ -11,6 +11,7 @@ import contextforge.adapters.project_commands as project_commands
 from contextforge.adapters.filesystem import (
     FilesystemExecutionControlStorage,
     LocalProjectLock,
+    LocalStagedPatchApplication,
 )
 from contextforge.adapters.project_commands import _project_id
 from contextforge.application import ExecutionController
@@ -791,6 +792,91 @@ def test_repeated_patch_rejection_reuses_fact_and_keeps_execution_cancelled(
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None
     assert restored.status.value == "cancelled"
+
+
+def test_patch_application_with_unknown_outcome_is_never_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage, execution, proposal_id = _awaiting_patch_execution(tmp_path)
+    approved = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+    assert approved.exit_code == 0
+    original_apply = LocalStagedPatchApplication.apply_proposal
+
+    def interrupt_after_mutation(
+        application: LocalStagedPatchApplication,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        generated = tmp_path / "src" / "contextforge_generated.py"
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        generated.write_text("unknown outcome\n", encoding="utf-8")
+        raise RuntimeError("simulated process interruption during mutation")
+
+    monkeypatch.setattr(
+        LocalStagedPatchApplication,
+        "apply_proposal",
+        interrupt_after_mutation,
+    )
+    command = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "patch",
+        "apply",
+        proposal_id,
+    ]
+    interrupted = runner.invoke(app, command)
+    assert interrupted.exit_code == 1
+    monkeypatch.setattr(
+        LocalStagedPatchApplication,
+        "apply_proposal",
+        original_apply,
+    )
+
+    repeated = runner.invoke(app, command)
+
+    assert repeated.exit_code == 14
+    assert "CLI_PATCH_APPLICATION_OUTCOME_UNKNOWN" in repeated.stdout
+    assert (tmp_path / "src" / "contextforge_generated.py").read_text(
+        encoding="utf-8"
+    ) == "unknown outcome\n"
+    attempt = json.loads(
+        (tmp_path / ".contextforge" / "applications" / f"{proposal_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert attempt["attempt_status"] == "submitted"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.APPLY
+    resumed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+    assert resumed.exit_code == 14
+    assert _payload(resumed)["status"] == "application_outcome_unknown"
 
 
 @pytest.mark.parametrize(

@@ -46,6 +46,7 @@ from contextforge.application import (
     ExecuteTask,
     ExecutionController,
     InitializeProject,
+    PatchApplicationOutcomeUnknownError,
     PatchApplicationPreview,
     PatchApplicationResult,
     PatchApplicationStatus,
@@ -1072,6 +1073,7 @@ class LocalProjectCommandGateway:
         except (
             PatchApprovalBindingError,
             PatchApprovalNotFoundError,
+            PatchApplicationOutcomeUnknownError,
             PatchProposalNotFoundError,
             PatchWorkflowStateError,
             ProjectLockUnavailableError,
@@ -2233,13 +2235,21 @@ def _reconcile_patch_execution(
         proposal_id = PatchProposalId(raw_proposal_id)
     except ValueError:
         return None
-    lifecycle = LocalPatchProposalStorage(root).load_lifecycle(proposal_id)
+    proposal_storage = LocalPatchProposalStorage(root)
+    lifecycle = proposal_storage.load_lifecycle(proposal_id)
     if lifecycle is None:
         return None
 
     controller = ExecutionController.resume(execution, storage)
     try:
         if lifecycle.state is ProposalLifecycleState.APPROVED:
+            if proposal_storage.application_attempt_started(proposal_id):
+                return _patch_reconciliation_result(
+                    controller.execution,
+                    "application_outcome_unknown",
+                    proposal_id,
+                    exit_code=CliExitCode.PROJECT_STATE_CONFLICT,
+                )
             if controller.execution.stage is ExecutionStage.AWAIT_APPROVAL:
                 controller.complete_stage(ExecutionStage.APPLY)
             return _patch_reconciliation_result(
@@ -2675,6 +2685,9 @@ def _patch_workflow_failure(error: Exception) -> CliCommandResult:
 def _patch_application_failure(error: Exception) -> CliCommandResult:
     if isinstance(error, ProjectLockUnavailableError):
         code = "CLI_PROJECT_LOCKED"
+        exit_code = CliExitCode.PROJECT_STATE_CONFLICT
+    elif isinstance(error, PatchApplicationOutcomeUnknownError):
+        code = "CLI_PATCH_APPLICATION_OUTCOME_UNKNOWN"
         exit_code = CliExitCode.PROJECT_STATE_CONFLICT
     elif isinstance(error, StaleProjectStateError):
         code = "CLI_PATCH_STALE"

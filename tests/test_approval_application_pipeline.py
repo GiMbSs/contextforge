@@ -7,6 +7,7 @@ import pytest
 from contextforge.application import (
     ApplyPatchProposal,
     ApprovePatchProposal,
+    PatchApplicationOutcomeUnknownError,
     PatchApplicationPreview,
     PatchApplicationResult,
     PatchApplicationStatus,
@@ -85,6 +86,7 @@ class MemoryStorage:
         self.application_results = []
         self.events = []
         self.rejections = []
+        self.application_attempt = None
 
     def load_proposal(self, proposal_id):
         return self.proposal if proposal_id == self.proposal.proposal_id else None
@@ -107,8 +109,27 @@ class MemoryStorage:
     def load_approval(self, approval_id):
         return self.approvals.get(approval_id)
 
+    def application_attempt_started(self, proposal_id):
+        return self.application_attempt is not None and self.application_attempt[0] == proposal_id
+
+    def begin_application_attempt(
+        self,
+        proposal_id,
+        approval_id,
+        proposal_fingerprint,
+        started_at,
+    ):
+        self.application_attempt = (
+            proposal_id,
+            approval_id,
+            proposal_fingerprint,
+            started_at,
+        )
+        self.events.append("application-attempt")
+
     def save_application_result(self, result):
         self.application_results.append(result)
+        self.application_attempt = None
         self.events.append("application-result")
 
 
@@ -174,10 +195,32 @@ def test_approval_is_explicitly_recorded_before_application() -> None:
     assert storage.events == [
         "approval",
         "lifecycle:approved",
+        "application-attempt",
         "apply",
         "application-result",
         "lifecycle:applied",
     ]
+
+
+def test_unknown_application_outcome_is_never_retried() -> None:
+    pipeline, storage, application, proposal = _pipeline()
+    approved = pipeline.approve(ApprovePatchProposal(proposal.proposal_id, ApprovalMethod.API))
+    storage.application_attempt = (
+        proposal.proposal_id,
+        approved.approval.approval_id,
+        approved.approval.proposal_fingerprint,
+        NOW,
+    )
+
+    with pytest.raises(PatchApplicationOutcomeUnknownError):
+        pipeline.apply(
+            ApplyPatchProposal(
+                proposal.proposal_id,
+                approved.approval.approval_id,
+            )
+        )
+
+    assert application.calls == []
 
 
 def test_rejection_records_reason_and_terminal_lifecycle() -> None:

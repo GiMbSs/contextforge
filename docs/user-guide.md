@@ -225,6 +225,12 @@ provider or applying files again. Repeating `patch approve`, `patch reject`, or
 `patch apply` returns the already persisted outcome instead of duplicating the
 operation.
 
+Immediately before project mutation, ContextForge persists an application
+attempt with `submitted` state. A completed adapter result replaces it with a
+`completed` record. If the process stops between those points, the outcome is
+reported as unknown and neither `patch apply` nor `execution resume` will retry
+the mutation automatically; inspect the project and recovery evidence manually.
+
 Inspect the project lock:
 
 ```bash

@@ -214,6 +214,7 @@ class LocalPatchProposalStorage:
         destination = directory / f"{result.proposal_id}.json"
         temporary = directory / f"{result.proposal_id}.json.tmp"
         payload = {
+            "attempt_status": "completed",
             "applied_change_ids": list(result.applied_change_ids),
             "diagnostics": [
                 {
@@ -232,6 +233,43 @@ class LocalPatchProposalStorage:
         }
         temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+
+    def application_attempt_started(self, proposal_id: PatchProposalId) -> bool:
+        """Whether mutation was submitted without a completed outcome."""
+        record = self.load_application_result(proposal_id)
+        return record is not None and record.get("attempt_status") == "submitted"
+
+    def begin_application_attempt(
+        self,
+        proposal_id: PatchProposalId,
+        approval_id: ApprovalId,
+        proposal_fingerprint: ProposalFingerprint,
+        started_at: datetime,
+    ) -> None:
+        """Persist exact application intent before any project mutation."""
+        directory = self.root.path / ".contextforge" / "applications"
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{proposal_id}.json"
+        if destination.exists():
+            raise ValueError("application attempt already exists")
+        temporary = directory / f"{proposal_id}.json.tmp"
+        temporary.write_text(
+            json.dumps(
+                {
+                    "approval_id": str(approval_id),
+                    "attempt_status": "submitted",
+                    "proposal_fingerprint": str(proposal_fingerprint),
+                    "proposal_id": str(proposal_id),
+                    "started_at": started_at.isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         temporary.replace(destination)
