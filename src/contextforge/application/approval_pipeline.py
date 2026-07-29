@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Protocol
 
 from contextforge.application.messages import (
@@ -70,6 +71,13 @@ class PatchWorkflowStorage(Protocol):
         """Whether an application attempt was durably submitted."""
         ...
 
+    def load_application_attempt(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> Mapping[str, object] | None:
+        """Load application evidence for manual reconciliation."""
+        ...
+
     def begin_application_attempt(
         self,
         proposal_id: PatchProposalId,
@@ -82,6 +90,15 @@ class PatchWorkflowStorage(Protocol):
 
     def save_application_result(self, result: PatchApplicationResult) -> None:
         """Persist the outcome of every application attempt."""
+        ...
+
+    def save_application_reconciliation(
+        self,
+        result: PatchApplicationResult,
+        outcome: PatchApplicationReconciliationOutcome,
+        reconciled_at: datetime,
+    ) -> None:
+        """Persist a manually attested outcome without losing its provenance."""
         ...
 
 
@@ -121,6 +138,33 @@ class PatchApplicationOutcomeUnknownError(PatchWorkflowError):
     """An earlier application was submitted without a durable outcome."""
 
 
+class PatchApplicationReconciliationOutcome(StrEnum):
+    """Operator-attested resolution of an interrupted application."""
+
+    APPLIED = "applied"
+    ROLLED_BACK = "rolled_back"
+
+
+@dataclass(frozen=True, slots=True)
+class ReconcilePatchApplication:
+    """Resolve one unknown application outcome with explicit recovery evidence."""
+
+    proposal_id: PatchProposalId
+    approval_id: ApprovalId
+    outcome: PatchApplicationReconciliationOutcome
+    recovery_reference: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.proposal_id, PatchProposalId):
+            raise TypeError("proposal_id must be a PatchProposalId")
+        if not isinstance(self.approval_id, ApprovalId):
+            raise TypeError("approval_id must be an ApprovalId")
+        if not isinstance(self.outcome, PatchApplicationReconciliationOutcome):
+            raise TypeError("outcome must be a PatchApplicationReconciliationOutcome")
+        if not isinstance(self.recovery_reference, str) or not self.recovery_reference.strip():
+            raise ValueError("recovery_reference must be non-empty text")
+
+
 @dataclass(frozen=True, slots=True)
 class PatchApprovalResult:
     """Durable approval and its resulting lifecycle."""
@@ -134,6 +178,15 @@ class PatchApplyResult:
     """Persisted application outcome and its resulting lifecycle."""
 
     application: PatchApplicationResult
+    lifecycle: PatchProposalLifecycle
+
+
+@dataclass(frozen=True, slots=True)
+class PatchApplicationReconciliationResult:
+    """Persisted operator resolution and resulting proposal lifecycle."""
+
+    application: PatchApplicationResult
+    outcome: PatchApplicationReconciliationOutcome
     lifecycle: PatchProposalLifecycle
 
 
@@ -266,6 +319,73 @@ class PatchApprovalApplicationPipeline:
         )
         self._storage.save_lifecycle(completed)
         return PatchApplyResult(application, completed)
+
+    def reconcile(
+        self,
+        command: ReconcilePatchApplication,
+    ) -> PatchApplicationReconciliationResult:
+        """Resolve a submitted attempt only from explicit operator evidence."""
+        if not isinstance(command, ReconcilePatchApplication):
+            raise TypeError("command must be a ReconcilePatchApplication")
+        proposal, lifecycle = self._load_workflow(command.proposal_id)
+        if lifecycle.state is not ProposalLifecycleState.APPROVED and not (
+            lifecycle.state is ProposalLifecycleState.APPLIED
+            and command.outcome is PatchApplicationReconciliationOutcome.APPLIED
+        ):
+            raise PatchWorkflowStateError(
+                f"Expected approved lifecycle, found {lifecycle.state.value}"
+            )
+        attempt = self._storage.load_application_attempt(command.proposal_id)
+        if attempt is None or attempt.get("attempt_status") not in {
+            "submitted",
+            "reconciled",
+        }:
+            raise PatchWorkflowStateError(
+                "Proposal has no unknown application outcome to reconcile"
+            )
+        if (
+            attempt.get("attempt_status") == "reconciled"
+            and attempt.get("resolution") != command.outcome.value
+        ):
+            raise PatchWorkflowStateError(
+                "Application attempt was already reconciled with another outcome"
+            )
+        if attempt.get("approval_id") != str(command.approval_id):
+            raise PatchApprovalBindingError("Application attempt is bound to another approval")
+        proposal_fingerprint = fingerprint_patch_proposal(proposal)
+        if attempt.get("proposal_fingerprint") != str(proposal_fingerprint):
+            raise PatchApprovalBindingError(
+                "Application attempt proposal fingerprint does not match"
+            )
+        change_ids = tuple(change.change_id for change in proposal.changes)
+        applied = command.outcome is PatchApplicationReconciliationOutcome.APPLIED
+        application = PatchApplicationResult(
+            proposal.proposal_id,
+            (PatchApplicationStatus.APPLIED if applied else PatchApplicationStatus.FAILED),
+            applied_change_ids=change_ids if applied else (),
+            unapplied_change_ids=() if applied else change_ids,
+            rollback_verified=True if not applied else None,
+            recovery_reference=command.recovery_reference,
+        )
+        reconciled_at = self._clock()
+        if attempt.get("attempt_status") == "submitted":
+            self._storage.save_application_reconciliation(
+                application,
+                command.outcome,
+                reconciled_at,
+            )
+        if applied and lifecycle.state is ProposalLifecycleState.APPROVED:
+            lifecycle = lifecycle.transition(
+                ProposalLifecycleState.APPLIED,
+                at=reconciled_at,
+                proposal_fingerprint=proposal_fingerprint,
+            )
+            self._storage.save_lifecycle(lifecycle)
+        return PatchApplicationReconciliationResult(
+            application,
+            command.outcome,
+            lifecycle,
+        )
 
     def _load_workflow(
         self,

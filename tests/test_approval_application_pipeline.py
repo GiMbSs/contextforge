@@ -9,11 +9,13 @@ from contextforge.application import (
     ApprovePatchProposal,
     PatchApplicationOutcomeUnknownError,
     PatchApplicationPreview,
+    PatchApplicationReconciliationOutcome,
     PatchApplicationResult,
     PatchApplicationStatus,
     PatchApprovalApplicationPipeline,
     PatchApprovalBindingError,
     PatchApprovalNotFoundError,
+    ReconcilePatchApplication,
     RejectPatchProposal,
     StaleProjectStateError,
 )
@@ -112,6 +114,16 @@ class MemoryStorage:
     def application_attempt_started(self, proposal_id):
         return self.application_attempt is not None and self.application_attempt[0] == proposal_id
 
+    def load_application_attempt(self, proposal_id):
+        if not self.application_attempt_started(proposal_id):
+            return None
+        return {
+            "approval_id": str(self.application_attempt[1]),
+            "attempt_status": "submitted",
+            "proposal_fingerprint": str(self.application_attempt[2]),
+            "proposal_id": str(proposal_id),
+        }
+
     def begin_application_attempt(
         self,
         proposal_id,
@@ -131,6 +143,11 @@ class MemoryStorage:
         self.application_results.append(result)
         self.application_attempt = None
         self.events.append("application-result")
+
+    def save_application_reconciliation(self, result, outcome, reconciled_at):
+        self.application_results.append(result)
+        self.application_attempt = None
+        self.events.append(f"application-reconciled:{outcome.value}")
 
 
 class ProjectState:
@@ -221,6 +238,55 @@ def test_unknown_application_outcome_is_never_retried() -> None:
         )
 
     assert application.calls == []
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_state", "expected_rollback"),
+    [
+        (
+            PatchApplicationReconciliationOutcome.APPLIED,
+            ProposalLifecycleState.APPLIED,
+            None,
+        ),
+        (
+            PatchApplicationReconciliationOutcome.ROLLED_BACK,
+            ProposalLifecycleState.APPROVED,
+            True,
+        ),
+    ],
+)
+def test_unknown_application_outcome_requires_explicit_reconciliation(
+    outcome: PatchApplicationReconciliationOutcome,
+    expected_state: ProposalLifecycleState,
+    expected_rollback: bool | None,
+) -> None:
+    pipeline, storage, application, proposal = _pipeline()
+    approved = pipeline.approve(ApprovePatchProposal(proposal.proposal_id, ApprovalMethod.API))
+    storage.begin_application_attempt(
+        proposal.proposal_id,
+        approved.approval.approval_id,
+        approved.approval.proposal_fingerprint,
+        NOW,
+    )
+
+    reconciled = pipeline.reconcile(
+        ReconcilePatchApplication(
+            proposal.proposal_id,
+            approved.approval.approval_id,
+            outcome,
+            "incident-42",
+        )
+    )
+
+    assert reconciled.lifecycle.state is expected_state
+    assert reconciled.application.rollback_verified is expected_rollback
+    assert reconciled.application.recovery_reference == "incident-42"
+    assert application.calls == []
+    assert storage.events[-1] == (
+        "lifecycle:applied"
+        if outcome is PatchApplicationReconciliationOutcome.APPLIED
+        else "application-reconciled:rolled_back"
+    )
 
 
 def test_rejection_records_reason_and_terminal_lifecycle() -> None:

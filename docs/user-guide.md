@@ -229,7 +229,32 @@ Immediately before project mutation, ContextForge persists an application
 attempt with `submitted` state. A completed adapter result replaces it with a
 `completed` record. If the process stops between those points, the outcome is
 reported as unknown and neither `patch apply` nor `execution resume` will retry
-the mutation automatically; inspect the project and recovery evidence manually.
+the mutation automatically.
+
+Inspect the exact durable application record before resolving it:
+
+```bash
+contextforge patch application <proposal-id>
+```
+
+After manually inspecting the project and any recovery artifacts, reconcile the
+attempt with an auditable reference. Repeat the exact proposal identifier in
+`--confirm`; this prevents resolving a different proposal accidentally:
+
+```bash
+contextforge patch reconcile <proposal-id> \
+  --outcome applied \
+  --confirm <proposal-id> \
+  --recovery-reference incident-42
+```
+
+Use `--outcome rolled-back` only after verifying that every project mutation
+was reverted. The proposal remains approved and may then be applied again, but
+the normal project-fingerprint and approval-binding checks still run before the
+new attempt. A reconciled `applied` outcome completes the proposal and its
+originating execution without applying files again. Reconciliation records
+retain the original submission data, declared resolution, timestamp, and
+recovery reference.
 
 Inspect the project lock:
 

@@ -603,6 +603,15 @@ def patch_review(
     _inspect_patch(ctx, "review", proposal_id=proposal_id)
 
 
+@patch_app.command("application")
+def patch_application(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument(help="Exact proposal identifier.")],
+) -> None:
+    """Inspect the durable application attempt and its current outcome."""
+    _inspect_patch(ctx, "application", proposal_id=proposal_id)
+
+
 @patch_app.command("export")
 def patch_export(
     ctx: typer.Context,
@@ -770,6 +779,71 @@ def patch_apply(
     if root is None:
         raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
     result = _gateway.apply_patch_proposal(root, proposal_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@patch_app.command("reconcile")
+def patch_reconcile(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument(help="Exact proposal identifier.")],
+    outcome: Annotated[
+        str,
+        typer.Option(
+            "--outcome",
+            help="Observed outcome: applied or rolled-back.",
+        ),
+    ],
+    confirmation: Annotated[
+        str,
+        typer.Option(
+            "--confirm",
+            help="Repeat the exact proposal identifier.",
+        ),
+    ],
+    recovery_reference: Annotated[
+        str,
+        typer.Option(
+            "--recovery-reference",
+            help="Auditable operator evidence or recovery reference.",
+        ),
+    ],
+) -> None:
+    """Resolve an unknown patch application outcome after manual inspection."""
+    options = ctx.ensure_object(GlobalOptions)
+    if confirmation != proposal_id:
+        typer.echo(
+            "CLI_PATCH_RECONCILIATION_CONFIRMATION_MISMATCH: "
+            "--confirm does not match the selected proposal.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.INVALID_USAGE))
+    normalized_outcome = outcome.replace("-", "_")
+    if normalized_outcome not in ("applied", "rolled_back"):
+        typer.echo(
+            "CLI_PATCH_RECONCILIATION_OUTCOME_INVALID: --outcome must be applied or rolled-back.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.INVALID_USAGE))
+    if not recovery_reference.strip():
+        typer.echo(
+            "CLI_PATCH_RECONCILIATION_REFERENCE_REQUIRED: --recovery-reference must not be empty.",
+            err=True,
+        )
+        raise typer.Exit(int(CliExitCode.INVALID_USAGE))
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.reconcile_patch_application(
+        root,
+        proposal_id,
+        outcome=normalized_outcome,
+        recovery_reference=recovery_reference,
+    )
     render_result(result, output_format=options.output_format)
     if result.exit_code is not CliExitCode.SUCCESS:
         raise typer.Exit(int(result.exit_code))

@@ -27,6 +27,8 @@ development are recorded in the Unreleased section.
   execution reconciliation after interrupted approval or application commits.
 - Added a durable pre-mutation application journal that blocks automatic retry
   when a submitted patch application has no persisted outcome.
+- Added explicit inspection and operator reconciliation of unknown patch
+  application outcomes, including auditable applied and verified-rollback paths.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

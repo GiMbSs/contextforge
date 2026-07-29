@@ -48,6 +48,7 @@ from contextforge.application import (
     InitializeProject,
     PatchApplicationOutcomeUnknownError,
     PatchApplicationPreview,
+    PatchApplicationReconciliationOutcome,
     PatchApplicationResult,
     PatchApplicationStatus,
     PatchApprovalApplicationPipeline,
@@ -59,6 +60,7 @@ from contextforge.application import (
     ProjectIndexBuild,
     ProjectInitialization,
     ProjectScan,
+    ReconcilePatchApplication,
     RejectPatchProposal,
     ScanProject,
     StaleProjectStateError,
@@ -260,6 +262,15 @@ class ProjectCommandGateway(Protocol):
         self,
         root: ProjectRoot,
         proposal_id: str,
+    ) -> CliCommandResult: ...
+
+    def reconcile_patch_application(
+        self,
+        root: ProjectRoot,
+        proposal_id: str,
+        *,
+        outcome: str,
+        recovery_reference: str,
     ) -> CliCommandResult: ...
 
     def configure(
@@ -832,6 +843,29 @@ class LocalProjectCommandGateway:
                     "status": "available",
                 }
             )
+        if operation == "application":
+            try:
+                selected_id = PatchProposalId(str(record["proposal_id"]))
+            except (KeyError, ValueError):
+                return _patch_failure(
+                    "CLI_PATCH_APPLICATION_RECORD_INVALID",
+                    "The selected proposal has an invalid application record binding.",
+                )
+            application = storage.load_application_attempt(selected_id)
+            if application is None:
+                return _patch_failure(
+                    "CLI_PATCH_APPLICATION_NOT_FOUND",
+                    "The selected proposal has no application record.",
+                )
+            return CliCommandResult(
+                {
+                    "application": application,
+                    "command": "patch application",
+                    "lifecycle_state": record.get("lifecycle_state"),
+                    "proposal_id": str(selected_id),
+                    "status": application.get("attempt_status"),
+                }
+            )
         if operation == "review":
             return CliCommandResult(
                 {
@@ -1129,6 +1163,88 @@ class LocalProjectCommandGateway:
                 )
             data["execution_id"] = str(execution_controller.execution.execution_id)
         return CliCommandResult(data, exit_code, diagnostics)
+
+    def reconcile_patch_application(
+        self,
+        root: ProjectRoot,
+        proposal_id: str,
+        *,
+        outcome: str,
+        recovery_reference: str,
+    ) -> CliCommandResult:
+        """Persist an explicit operator resolution for an unknown mutation."""
+        try:
+            selected_id = PatchProposalId(proposal_id)
+            selected_outcome = PatchApplicationReconciliationOutcome(outcome)
+        except (TypeError, ValueError):
+            return _patch_failure(
+                "CLI_PATCH_RECONCILIATION_INVALID",
+                "The proposal identifier or reconciliation outcome is invalid.",
+            )
+        if not recovery_reference.strip():
+            return _patch_failure(
+                "CLI_PATCH_RECONCILIATION_INVALID",
+                "A non-empty recovery reference is required.",
+            )
+        storage = LocalPatchProposalStorage(root)
+        proposal = storage.load_proposal(selected_id)
+        approval = storage.load_active_approval(selected_id)
+        if proposal is None:
+            return _patch_failure(
+                "CLI_PATCH_PROPOSAL_NOT_FOUND",
+                "The requested patch proposal is unavailable.",
+            )
+        if approval is None:
+            return _patch_failure(
+                "CLI_PATCH_APPROVAL_REQUIRED",
+                "An active Approval Record is required for reconciliation.",
+            )
+        pipeline = PatchApprovalApplicationPipeline(
+            storage=storage,
+            project_state=_FixedProjectState(proposal.project_fingerprint),
+            application=_UnavailablePatchApplication(),
+        )
+        try:
+            with LocalProjectLock(root, "patch_reconcile"):
+                reconciled = pipeline.reconcile(
+                    ReconcilePatchApplication(
+                        selected_id,
+                        approval.approval_id,
+                        selected_outcome,
+                        recovery_reference,
+                    )
+                )
+        except (
+            PatchApprovalBindingError,
+            PatchProposalNotFoundError,
+            PatchWorkflowStateError,
+            ProjectLockUnavailableError,
+        ) as error:
+            return _patch_application_failure(error)
+        execution_controller = _patch_execution_controller(root, proposal)
+        if (
+            selected_outcome is PatchApplicationReconciliationOutcome.APPLIED
+            and execution_controller is not None
+            and execution_controller.execution.stage is ExecutionStage.APPLY
+        ):
+            execution_controller.complete_stage(ExecutionStage.COMPLETE)
+        return CliCommandResult(
+            {
+                "applied_change_ids": list(reconciled.application.applied_change_ids),
+                "command": "patch reconcile",
+                "execution_id": (
+                    str(execution_controller.execution.execution_id)
+                    if execution_controller is not None
+                    else None
+                ),
+                "lifecycle_state": reconciled.lifecycle.state.value,
+                "proposal_id": proposal_id,
+                "recovery_reference": recovery_reference,
+                "resolution": selected_outcome.value,
+                "status": "reconciled",
+                "unapplied_change_ids": list(reconciled.application.unapplied_change_ids),
+            }
+        )
 
     def configure(
         self,
@@ -2249,6 +2365,26 @@ def _reconcile_patch_execution(
                     "application_outcome_unknown",
                     proposal_id,
                     exit_code=CliExitCode.PROJECT_STATE_CONFLICT,
+                )
+            application = proposal_storage.load_application_attempt(proposal_id)
+            if (
+                application is not None
+                and application.get("attempt_status") == "reconciled"
+                and application.get("resolution") == "applied"
+            ):
+                lifecycle = lifecycle.transition(
+                    ProposalLifecycleState.APPLIED,
+                    at=datetime.now(UTC),
+                    proposal_fingerprint=lifecycle.proposal_fingerprint,
+                )
+                proposal_storage.save_lifecycle(lifecycle)
+                if controller.execution.stage is ExecutionStage.AWAIT_APPROVAL:
+                    controller.complete_stage(ExecutionStage.APPLY)
+                controller.complete_stage(ExecutionStage.COMPLETE)
+                return _patch_reconciliation_result(
+                    controller.execution,
+                    "completed_after_reconciled_application",
+                    proposal_id,
                 )
             if controller.execution.stage is ExecutionStage.AWAIT_APPROVAL:
                 controller.complete_stage(ExecutionStage.APPLY)

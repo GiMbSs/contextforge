@@ -10,6 +10,8 @@ from contextforge.application.analysis import (
 from contextforge.application.approval_pipeline import (
     CurrentProjectState,
     PatchApplicationOutcomeUnknownError,
+    PatchApplicationReconciliationOutcome,
+    PatchApplicationReconciliationResult,
     PatchApplyResult,
     PatchApprovalApplicationPipeline,
     PatchApprovalBindingError,
@@ -20,6 +22,7 @@ from contextforge.application.approval_pipeline import (
     PatchWorkflowError,
     PatchWorkflowStateError,
     PatchWorkflowStorage,
+    ReconcilePatchApplication,
     StaleProjectStateError,
 )
 from contextforge.application.context_pipeline import (
@@ -127,6 +130,8 @@ __all__ = [
     "PatchApplicationOutcomeUnknownError",
     "PatchApplicationPreflight",
     "PatchApplicationPreview",
+    "PatchApplicationReconciliationOutcome",
+    "PatchApplicationReconciliationResult",
     "PatchApplicationResult",
     "PatchApplicationStatus",
     "PatchApplyResult",
@@ -152,6 +157,7 @@ __all__ = [
     "ProjectScan",
     "ProviderNotFoundError",
     "ProviderRegistry",
+    "ReconcilePatchApplication",
     "RecoveryDisposition",
     "RejectPatchProposal",
     "ScanProject",

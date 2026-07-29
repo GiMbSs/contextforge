@@ -878,6 +878,81 @@ def test_patch_application_with_unknown_outcome_is_never_retried(
     assert resumed.exit_code == 14
     assert _payload(resumed)["status"] == "application_outcome_unknown"
 
+    inspected = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "application",
+            proposal_id,
+        ],
+    )
+    assert inspected.exit_code == 0
+    assert _payload(inspected)["application"]["attempt_status"] == "submitted"
+
+    (tmp_path / "src" / "contextforge_generated.py").unlink()
+    (tmp_path / "src").rmdir()
+    mismatched = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "patch",
+            "reconcile",
+            proposal_id,
+            "--outcome",
+            "rolled-back",
+            "--confirm",
+            "another-proposal",
+            "--recovery-reference",
+            "incident-42",
+        ],
+    )
+    assert mismatched.exit_code == 2
+    reconciled = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "reconcile",
+            proposal_id,
+            "--outcome",
+            "rolled-back",
+            "--confirm",
+            proposal_id,
+            "--recovery-reference",
+            "incident-42",
+        ],
+    )
+    assert reconciled.exit_code == 0
+    assert _payload(reconciled)["resolution"] == "rolled_back"
+    reconciled_record = json.loads(
+        (tmp_path / ".contextforge" / "applications" / f"{proposal_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert reconciled_record["attempt_status"] == "reconciled"
+    assert reconciled_record["recovery_reference"] == "incident-42"
+
+    retried = runner.invoke(app, command)
+    assert retried.exit_code == 0, retried.stdout
+    assert _payload(retried)["status"] == "applied"
+    completed_record = json.loads(
+        (tmp_path / ".contextforge" / "applications" / f"{proposal_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert completed_record["history"][0]["resolution"] == "rolled_back"
+    completed = storage.load_execution(execution.execution_id)
+    assert completed is not None
+    assert completed.stage is ExecutionStage.COMPLETE
+
 
 @pytest.mark.parametrize(
     ("workflow", "task_kind", "requested_output", "expected_exit_code"),

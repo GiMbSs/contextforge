@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from contextforge.application import PatchApplicationResult
+from contextforge.application import (
+    PatchApplicationReconciliationOutcome,
+    PatchApplicationResult,
+)
 from contextforge.diagnostics import DiagnosticCode, DiagnosticSeverity
 from contextforge.domain import (
     ApprovalId,
@@ -213,6 +216,8 @@ class LocalPatchProposalStorage:
         directory.mkdir(parents=True, exist_ok=True)
         destination = directory / f"{result.proposal_id}.json"
         temporary = directory / f"{result.proposal_id}.json.tmp"
+        existing = _read_json_object(destination)
+        history = existing.get("history", []) if existing is not None else []
         payload = {
             "attempt_status": "completed",
             "applied_change_ids": list(result.applied_change_ids),
@@ -225,6 +230,7 @@ class LocalPatchProposalStorage:
                 }
                 for diagnostic in result.diagnostics
             ],
+            "history": history if isinstance(history, list) else [],
             "proposal_id": str(result.proposal_id),
             "recovery_reference": result.recovery_reference,
             "rollback_verified": result.rollback_verified,
@@ -242,6 +248,13 @@ class LocalPatchProposalStorage:
         record = self.load_application_result(proposal_id)
         return record is not None and record.get("attempt_status") == "submitted"
 
+    def load_application_attempt(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> dict[str, object] | None:
+        """Load application evidence for inspection and reconciliation."""
+        return self.load_application_result(proposal_id)
+
     def begin_application_attempt(
         self,
         proposal_id: PatchProposalId,
@@ -253,14 +266,25 @@ class LocalPatchProposalStorage:
         directory = self.root.path / ".contextforge" / "applications"
         directory.mkdir(parents=True, exist_ok=True)
         destination = directory / f"{proposal_id}.json"
+        history: list[object] = []
         if destination.exists():
-            raise ValueError("application attempt already exists")
+            existing = _read_json_object(destination)
+            if existing is None or not (
+                existing.get("attempt_status") == "reconciled"
+                and existing.get("resolution") == "rolled_back"
+            ):
+                raise ValueError("application attempt already exists")
+            previous_history = existing.pop("history", [])
+            if isinstance(previous_history, list):
+                history.extend(previous_history)
+            history.append(existing)
         temporary = directory / f"{proposal_id}.json.tmp"
         temporary.write_text(
             json.dumps(
                 {
                     "approval_id": str(approval_id),
                     "attempt_status": "submitted",
+                    "history": history,
                     "proposal_fingerprint": str(proposal_fingerprint),
                     "proposal_id": str(proposal_id),
                     "started_at": started_at.isoformat(),
@@ -270,6 +294,38 @@ class LocalPatchProposalStorage:
                 sort_keys=True,
             )
             + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+
+    def save_application_reconciliation(
+        self,
+        result: PatchApplicationResult,
+        outcome: PatchApplicationReconciliationOutcome,
+        reconciled_at: datetime,
+    ) -> None:
+        """Persist an operator-attested result while retaining provenance."""
+        directory = self.root.path / ".contextforge" / "applications"
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{result.proposal_id}.json"
+        existing = _read_json_object(destination)
+        if existing is None or existing.get("attempt_status") != "submitted":
+            raise ValueError("submitted application attempt is unavailable")
+        payload = {
+            **existing,
+            "attempt_status": "reconciled",
+            "applied_change_ids": list(result.applied_change_ids),
+            "diagnostics": [],
+            "reconciled_at": reconciled_at.isoformat(),
+            "recovery_reference": result.recovery_reference,
+            "resolution": outcome.value,
+            "rollback_verified": result.rollback_verified,
+            "status": result.status.value,
+            "unapplied_change_ids": list(result.unapplied_change_ids),
+        }
+        temporary = directory / f"{result.proposal_id}.json.tmp"
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         temporary.replace(destination)
