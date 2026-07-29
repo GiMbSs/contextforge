@@ -138,7 +138,69 @@ def test_retriever_expands_reviewed_semantic_aliases_deterministically() -> None
     )
 
     assert result.selected_items[0].content_reference == "src/service.py"
-    assert result.strategy_versions[0] == "simple-retriever-v2"
+    assert result.strategy_versions[0] == "simple-retriever-v3"
+
+
+def test_retriever_suppresses_historical_distractors_for_runtime_tasks() -> None:
+    index = _make_index(
+        (
+            ("unit_archive", "src/greeting_archive.py", "historical legacy greeting"),
+            ("unit_service", "src/service.py", "runtime greeting"),
+        )
+    )
+
+    runtime_result = SimpleContextRetriever().retrieve(
+        _request("explain the runtime greeting", index, max_artifacts=2)
+    )
+    historical_result = SimpleContextRetriever().retrieve(
+        _request("explain the historical greeting archive", index, max_artifacts=1)
+    )
+
+    assert tuple(item.content_reference for item in runtime_result.selected_items) == (
+        "src/service.py",
+    )
+    assert historical_result.selected_items[0].content_reference == "src/greeting_archive.py"
+    archive_rationale = next(
+        rationale
+        for rationale in runtime_result.rationales
+        if rationale.candidate_id == "unit_archive"
+    )
+    assert "historical_penalty=" in archive_rationale.evidence[0].detail
+
+
+def test_historical_marker_applies_to_every_unit_in_the_artifact() -> None:
+    index = _make_index(
+        (
+            ("unit_heading", "docs/greetings.md", "Greeting examples"),
+            ("unit_service", "src/service.py", "runtime greeting implementation"),
+        )
+    )
+    documentation = index.indexed_artifacts[0]
+    historical_note = replace(
+        index.search_units[0],
+        search_unit_id="unit_note",
+        text="Historical documentation only.",
+        order=2,
+    )
+    documentation = replace(
+        documentation,
+        search_unit_ids=("unit_heading", "unit_note"),
+    )
+    index = replace(
+        index,
+        indexed_artifacts=(documentation, index.indexed_artifacts[1]),
+        search_units=(
+            index.search_units[0],
+            historical_note,
+            index.search_units[1],
+        ),
+    )
+
+    result = SimpleContextRetriever().retrieve(
+        _request("explain the runtime greeting", index, max_artifacts=2)
+    )
+
+    assert tuple(item.content_reference for item in result.selected_items) == ("src/service.py",)
 
 
 def test_retriever_falls_back_to_smallest_artifacts_when_no_match() -> None:

@@ -32,11 +32,15 @@ from contextforge.retrieval.models import (
 )
 from contextforge.retrieval.query import TaskQueryNormalizer
 
-SIMPLE_RETRIEVER_VERSION = "simple-retriever-v2"
+SIMPLE_RETRIEVER_VERSION = "simple-retriever-v3"
 
 _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "composed": ("configuration", "settings"),
+    "constructed": ("configuration", "settings"),
     "salutation": ("greeting",),
 }
+_CURRENT_BEHAVIOR_TERMS = frozenset({"active", "current", "production", "runtime"})
+_HISTORICAL_MARKERS = frozenset({"archive", "deprecated", "historical", "legacy"})
 
 
 def _normalize(value: str) -> str:
@@ -74,6 +78,16 @@ def _estimate_tokens(character_count: int) -> int:
     return max(1, (character_count * 11 + 39) // 40)
 
 
+def _is_historical_distractor(
+    keywords: tuple[str, ...],
+    *candidate_text: str,
+) -> bool:
+    if not _CURRENT_BEHAVIOR_TERMS.intersection(keywords):
+        return False
+    normalized = " ".join(_normalize(value) for value in candidate_text)
+    return any(marker in normalized for marker in _HISTORICAL_MARKERS)
+
+
 @dataclass(frozen=True, slots=True)
 class _ScoredCandidate:
     candidate_id: str
@@ -88,6 +102,7 @@ class _ScoredCandidate:
     name_hits: tuple[str, ...]
     content_hits: tuple[str, ...]
     content_fingerprint: str | None = None
+    historical_penalty: int = 0
 
 
 class SimpleContextRetriever:
@@ -167,6 +182,18 @@ class SimpleContextRetriever:
         units: tuple[SearchUnit, ...],
     ) -> list[_ScoredCandidate]:
         scored: list[_ScoredCandidate] = []
+        texts_by_artifact: dict[ArtifactId, list[str]] = {}
+        for unit in units:
+            texts_by_artifact.setdefault(unit.artifact_id, []).append(unit.text)
+        historical_artifacts = {
+            artifact_id
+            for artifact_id, artifact in artifact_by_id.items()
+            if _is_historical_distractor(
+                keywords,
+                str(artifact.path) if artifact.path is not None else "",
+                *texts_by_artifact.get(artifact_id, ()),
+            )
+        }
         for unit in units:
             artifact = artifact_by_id.get(unit.artifact_id)
             if artifact is None:
@@ -174,7 +201,8 @@ class SimpleContextRetriever:
             path = str(artifact.path) if artifact.path is not None else ""
             path_hits = _unique_hits(keywords, path)
             content_hits = _unique_hits(keywords, unit.text)
-            score = 3 * len(path_hits) + len(content_hits)
+            raw_score = 3 * len(path_hits) + len(content_hits)
+            historical_penalty = raw_score if unit.artifact_id in historical_artifacts else 0
             scored.append(
                 _ScoredCandidate(
                     candidate_id=unit.search_unit_id,
@@ -184,11 +212,12 @@ class SimpleContextRetriever:
                     location=unit.location,
                     estimated_bytes=len(unit.text.encode("utf-8")),
                     estimated_characters=len(unit.text),
-                    score=score,
+                    score=raw_score - historical_penalty,
                     path_hits=path_hits,
                     name_hits=(),
                     content_hits=content_hits,
                     content_fingerprint=artifact.content_fingerprint,
+                    historical_penalty=historical_penalty,
                 )
             )
         return scored
@@ -212,7 +241,18 @@ class SimpleContextRetriever:
             # A symbol-name match is more specific than a path/content token match.
             # Keep it dominant so generic filenames cannot displace the definition
             # under a one-artifact budget.
-            score = 3 * len(path_hits) + 6 * len(name_hits) + len(content_hits)
+            raw_score = 3 * len(path_hits) + 6 * len(name_hits) + len(content_hits)
+            historical_penalty = (
+                raw_score
+                if _is_historical_distractor(
+                    keywords,
+                    path,
+                    symbol.name,
+                    symbol.signature or "",
+                    *(unit.text for unit in units_by_artifact.get(symbol.artifact_id, ())),
+                )
+                else 0
+            )
             estimated_bytes = self._estimate_artifact_bytes_from_units(
                 units_by_artifact, symbol.artifact_id
             )
@@ -225,11 +265,12 @@ class SimpleContextRetriever:
                     location=symbol.location,
                     estimated_bytes=estimated_bytes,
                     estimated_characters=len(symbol.signature or symbol.name),
-                    score=score,
+                    score=raw_score - historical_penalty,
                     path_hits=path_hits,
                     name_hits=name_hits,
                     content_hits=content_hits,
                     content_fingerprint=artifact.content_fingerprint,
+                    historical_penalty=historical_penalty,
                 )
             )
         return scored
@@ -550,7 +591,8 @@ class SimpleContextRetriever:
             f"score={candidate.score};"
             f"path_hits={','.join(candidate.path_hits) or 'none'};"
             f"name_hits={','.join(candidate.name_hits) or 'none'};"
-            f"content_hits={','.join(candidate.content_hits) or 'none'}"
+            f"content_hits={','.join(candidate.content_hits) or 'none'};"
+            f"historical_penalty={candidate.historical_penalty}"
         )
         return RetrievalEvidence(
             evidence_type="simple-lexical",
@@ -565,8 +607,9 @@ class SimpleContextRetriever:
     ) -> tuple[tuple[str, float], ...]:
         return (
             ("path", float(3 * len(candidate.path_hits))),
-            ("name", float(2 * len(candidate.name_hits))),
+            ("name", float(6 * len(candidate.name_hits))),
             ("content", float(len(candidate.content_hits))),
+            ("historical_penalty", float(-candidate.historical_penalty)),
         )
 
     @staticmethod
