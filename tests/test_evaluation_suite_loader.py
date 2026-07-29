@@ -171,9 +171,13 @@ def test_versioned_core_suite_loads_with_expanded_cases() -> None:
         "budget-pressure",
         "competing-symbols",
         "configuration-implementation",
+        "deep-dependency-chain",
         "dependency-closure",
         "direct-path",
         "direct-symbol",
+        "homonymous-admin-render",
+        "homonymous-public-render",
         "lexical-synonym",
+        "test-to-implementation",
         "unsolvable-missing-artifact",
     )

@@ -79,7 +79,7 @@ def test_reviewed_core_baseline_thresholds_pass(tmp_path: Path) -> None:
     assert baseline["stable_runs"] == 2
     assert baseline["suite_version"] == "1.1"
     assert result.exit_code == 0
-    assert "8 cases, 0 failed" in result.stdout
+    assert "12 cases, 0 failed" in result.stdout
 
 
 def test_evaluate_can_fail_when_a_selected_case_errors(

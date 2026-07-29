@@ -122,7 +122,7 @@ def test_runner_completes_every_initial_core_case() -> None:
 def test_core_suite_covers_retrieval_dependencies_and_insufficient_evidence() -> None:
     suite = _suite()
 
-    assert len(suite.cases) == 8
+    assert len(suite.cases) == 12
     assert {
         "direct",
         "symbol",
@@ -130,6 +130,9 @@ def test_core_suite_covers_retrieval_dependencies_and_insufficient_evidence() ->
         "ambiguity",
         "dependency",
         "budget",
+        "deep",
+        "homonym",
+        "test-navigation",
         "unsolvable",
     } <= {tag for case in suite.cases for tag in case.tags}
 

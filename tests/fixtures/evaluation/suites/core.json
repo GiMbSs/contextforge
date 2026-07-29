@@ -11,7 +11,7 @@
         "GREETING",
         "format_greeting"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -59,7 +59,7 @@
       "expected_evidence": [
         "format_greeting"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -96,7 +96,7 @@
         "GREETING",
         "format_greeting"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -135,7 +135,7 @@
         "format_greeting",
         "greet"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -178,7 +178,7 @@
       "expected_evidence": [
         "format_greeting"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -209,7 +209,7 @@
         "GREETING",
         "format_greeting"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -245,7 +245,7 @@
       "expected_evidence": [
         "greet"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -274,7 +274,7 @@
       "expected_evidence": [
         "missing_runtime_policy"
       ],
-      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
       "fixture_project_id": "minimal-python",
       "judgments": [
         {
@@ -293,8 +293,174 @@
       ],
       "task_kind": "explain",
       "task_text": "Explain the missing_runtime_policy implementation."
+    },
+    {
+      "case_id": "test-to-implementation",
+      "context_budget": {
+        "max_artifacts": 2,
+        "max_estimated_tokens": 220
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "test_format_greeting",
+        "format_greeting"
+      ],
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "tests/service_spec.py",
+          "relevance": "required",
+          "symbols": [
+            "test_format_greeting"
+          ]
+        },
+        {
+          "path": "src/service.py",
+          "relevance": "required",
+          "symbols": [
+            "format_greeting"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "dependency",
+        "retrieval",
+        "test-navigation"
+      ],
+      "task_kind": "explain",
+      "task_text": "Trace tests/service_spec.py to the production implementation it verifies."
+    },
+    {
+      "case_id": "deep-dependency-chain",
+      "context_budget": {
+        "max_artifacts": 4,
+        "max_estimated_tokens": 420
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "build_response",
+        "greet",
+        "format_greeting",
+        "GREETING"
+      ],
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/controller.py",
+          "relevance": "required",
+          "symbols": [
+            "build_response"
+          ]
+        },
+        {
+          "path": "src/app.py",
+          "relevance": "required",
+          "symbols": [
+            "greet"
+          ]
+        },
+        {
+          "path": "src/service.py",
+          "relevance": "required",
+          "symbols": [
+            "format_greeting"
+          ]
+        },
+        {
+          "path": "src/settings.py",
+          "relevance": "supporting",
+          "symbols": [
+            "GREETING"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "deep",
+        "dependency",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Trace src/controller.py through the complete runtime greeting dependency chain."
+    },
+    {
+      "case_id": "homonymous-admin-render",
+      "context_budget": {
+        "max_artifacts": 1,
+        "max_estimated_tokens": 140
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "render"
+      ],
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/admin_view.py",
+          "relevance": "required",
+          "symbols": [
+            "render"
+          ]
+        },
+        {
+          "path": "src/public_view.py",
+          "relevance": "irrelevant",
+          "symbols": [
+            "render"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "ambiguity",
+        "homonym",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Explain the render symbol specifically in src/admin_view.py."
+    },
+    {
+      "case_id": "homonymous-public-render",
+      "context_budget": {
+        "max_artifacts": 1,
+        "max_estimated_tokens": 140
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "render"
+      ],
+      "fixture_fingerprint": "project_sha256_213db917745a6697a8e1ea1f0dadf24bf4baa648577a032d33ee7f52379afb7c",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/public_view.py",
+          "relevance": "required",
+          "symbols": [
+            "render"
+          ]
+        },
+        {
+          "path": "src/admin_view.py",
+          "relevance": "irrelevant",
+          "symbols": [
+            "render"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "ambiguity",
+        "homonym",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Explain the render symbol specifically in src/public_view.py."
     }
   ],
   "suite_id": "core",
-  "suite_version": "1.1"
+  "suite_version": "1.2"
 }
