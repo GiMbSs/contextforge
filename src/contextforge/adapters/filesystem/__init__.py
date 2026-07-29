@@ -1,5 +1,9 @@
 """Local filesystem adapters."""
 
+from contextforge.adapters.filesystem.executions import (
+    ExecutionStorageError,
+    FilesystemExecutionControlStorage,
+)
 from contextforge.adapters.filesystem.initialization import LocalProjectInitialization
 from contextforge.adapters.filesystem.local import LocalProjectTraversal
 from contextforge.adapters.filesystem.patches import (
@@ -14,6 +18,8 @@ from contextforge.adapters.filesystem.state import (
 )
 
 __all__ = [
+    "ExecutionStorageError",
+    "FilesystemExecutionControlStorage",
     "FilesystemIndexStorage",
     "FilesystemInventoryStorage",
     "LocalProjectInitialization",

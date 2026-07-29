@@ -44,7 +44,29 @@ class ExecutionStatus(StrEnum):
         }
 
 
+class ExecutionWorkflow(StrEnum):
+    """Supported lifecycle paths through the execution stages."""
+
+    ANALYSIS = "analysis"
+    PATCH = "patch"
+
+
 EXECUTION_STAGE_ORDER: tuple[ExecutionStage, ...] = tuple(ExecutionStage)
+ANALYSIS_STAGE_ORDER: tuple[ExecutionStage, ...] = (
+    ExecutionStage.RESOLVE,
+    ExecutionStage.SCAN,
+    ExecutionStage.INDEX,
+    ExecutionStage.RETRIEVE,
+    ExecutionStage.BUILD_CONTEXT,
+    ExecutionStage.BUILD_PROMPT,
+    ExecutionStage.INVOKE_PROVIDER,
+    ExecutionStage.VALIDATE_RESPONSE,
+    ExecutionStage.COMPLETE,
+)
+
+
+def _stage_order(workflow: ExecutionWorkflow) -> tuple[ExecutionStage, ...]:
+    return ANALYSIS_STAGE_ORDER if workflow is ExecutionWorkflow.ANALYSIS else EXECUTION_STAGE_ORDER
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -57,6 +79,7 @@ class Execution:
     stage: ExecutionStage = ExecutionStage.RESOLVE
     status: ExecutionStatus = ExecutionStatus.CREATED
     completed_stages: tuple[ExecutionStage, ...] = ()
+    workflow: ExecutionWorkflow = ExecutionWorkflow.PATCH
 
     def __post_init__(self) -> None:
         if not isinstance(self.execution_id, ExecutionId):
@@ -69,14 +92,21 @@ class Execution:
             raise TypeError("stage must be an ExecutionStage")
         if not isinstance(self.status, ExecutionStatus):
             raise TypeError("status must be an ExecutionStatus")
+        if not isinstance(self.workflow, ExecutionWorkflow):
+            raise TypeError("workflow must be an ExecutionWorkflow")
 
         completed_stages = tuple(self.completed_stages)
         if any(not isinstance(stage, ExecutionStage) for stage in completed_stages):
             raise TypeError("completed_stages must contain only ExecutionStage values")
         object.__setattr__(self, "completed_stages", completed_stages)
 
-        stage_index = EXECUTION_STAGE_ORDER.index(self.stage)
-        if completed_stages != EXECUTION_STAGE_ORDER[:stage_index]:
+        stage_order = _stage_order(self.workflow)
+        if self.stage not in stage_order:
+            raise ValueError(
+                f"{self.stage.value} is not part of the {self.workflow.value} workflow"
+            )
+        stage_index = stage_order.index(self.stage)
+        if completed_stages != stage_order[:stage_index]:
             raise ValueError("completed_stages must be the canonical prefix before stage")
         if self.status is ExecutionStatus.CREATED and self.stage is not ExecutionStage.RESOLVE:
             raise ValueError("A created Execution must be at the RESOLVE stage")
@@ -106,11 +136,12 @@ class Execution:
         if not isinstance(next_stage, ExecutionStage):
             raise TypeError("next_stage must be an ExecutionStage")
 
-        stage_index = EXECUTION_STAGE_ORDER.index(self.stage)
+        stage_order = _stage_order(self.workflow)
+        stage_index = stage_order.index(self.stage)
         expected_index = stage_index + 1
-        if expected_index >= len(EXECUTION_STAGE_ORDER):
+        if expected_index >= len(stage_order):
             raise ValueError("The Execution has no next stage")
-        expected_stage = EXECUTION_STAGE_ORDER[expected_index]
+        expected_stage = stage_order[expected_index]
         if next_stage is not expected_stage:
             raise ValueError(f"Expected next stage {expected_stage.name}, got {next_stage.name}")
 

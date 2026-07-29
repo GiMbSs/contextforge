@@ -15,6 +15,8 @@ workflows for building precise, traceable LLM context from a software project.
 - Scanner, indexer, analysis, and approval-gated patch-proposal execution.
 - Durable, versioned inventory and index snapshots with incremental reuse across
   separate CLI executions.
+- Durable execution lifecycle snapshots and immutable per-stage diagnostics,
+  with distinct analysis and patch workflow paths.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

@@ -153,6 +153,11 @@ Both commands report diagnostics, and re-running them reuses unchanged
 artifacts automatically. Context and prompt records produced by `run` remain
 under `.contextforge/executions/`.
 
+Each `run` also persists its execution snapshot and immutable stage outcomes.
+`contextforge status` reports the latest execution identifier, workflow, stage,
+and terminal status. Analysis workflows complete after response validation;
+proposal-generation workflows are durably recorded at `await_approval`.
+
 ## Analysis task
 
 Run a read-only analysis task:

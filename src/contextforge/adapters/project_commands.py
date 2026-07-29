@@ -21,6 +21,7 @@ from contextforge.adapters.configuration import (
 )
 from contextforge.adapters.configuration.toml import TomlConfigurationSourceAdapter
 from contextforge.adapters.filesystem import (
+    FilesystemExecutionControlStorage,
     FilesystemIndexStorage,
     FilesystemInventoryStorage,
     LocalProjectInitialization,
@@ -36,6 +37,7 @@ from contextforge.application import (
     ApprovePatchProposal,
     BuildProjectIndex,
     ExecuteTask,
+    ExecutionController,
     InitializeProject,
     PatchApplicationPreview,
     PatchApplicationResult,
@@ -64,9 +66,17 @@ from contextforge.context import (
     ContextBundleSerializer,
 )
 from contextforge.context.simple_builder import SimpleContextBuilder
-from contextforge.diagnostics import DiagnosticCollection
+from contextforge.diagnostics import (
+    Diagnostic,
+    DiagnosticCode,
+    DiagnosticCollection,
+    DiagnosticSeverity,
+)
 from contextforge.domain import (
     ArtifactPath,
+    Execution,
+    ExecutionStage,
+    ExecutionWorkflow,
     PatchProposalId,
     ProjectFingerprint,
     ProjectId,
@@ -75,6 +85,7 @@ from contextforge.domain import (
     TaskKind,
     TaskSpecification,
     fingerprint_content,
+    new_execution_id,
     new_task_id,
 )
 from contextforge.indexer import (
@@ -279,10 +290,22 @@ class LocalProjectCommandGateway:
         metadata = root.path / ".contextforge"
         configuration = metadata / "config.toml"
         initialized = metadata.is_dir()
+        latest_execution = FilesystemExecutionControlStorage(root).load_latest(_project_id(root))
         return CliCommandResult(
             {
                 "command": "status",
                 "configuration_present": configuration.is_file(),
+                "execution": (
+                    {
+                        "execution_id": str(latest_execution.execution_id),
+                        "stage": latest_execution.stage.value,
+                        "status": latest_execution.status.value,
+                        "task_id": str(latest_execution.task_id),
+                        "workflow": latest_execution.workflow.value,
+                    }
+                    if latest_execution is not None
+                    else None
+                ),
                 "initialized": initialized,
                 "project_id": str(_project_id(root)),
                 "project_root": str(root.path),
@@ -350,7 +373,26 @@ class LocalProjectCommandGateway:
         provider_id: str,
         explicit_config: Path | None = None,
     ) -> CliCommandResult:
-        self._prepare_project_state(root)
+        task = TaskSpecification(
+            new_task_id(),
+            task_text,
+            TaskKind.EXPLAIN,
+            RequestedOutput.ANALYSIS,
+        )
+        controller = ExecutionController(
+            Execution(
+                new_execution_id(),
+                _project_id(root),
+                task.task_id,
+                workflow=ExecutionWorkflow.ANALYSIS,
+            ),
+            FilesystemExecutionControlStorage(root),
+        )
+        controller.complete_stage(ExecutionStage.SCAN)
+        inventory = self._scan(root)
+        controller.complete_stage(ExecutionStage.INDEX, inventory.diagnostics)
+        project_index = self._index_inventory(root, inventory)
+        controller.complete_stage(ExecutionStage.RETRIEVE, project_index.diagnostics)
         pipeline = AnalysisExecutionPipeline(
             inventory_storage=FilesystemInventoryStorage(root),
             index_storage=FilesystemIndexStorage(root),
@@ -360,19 +402,26 @@ class LocalProjectCommandGateway:
             providers=_provider_registry(root, explicit_config),
             budget=ContextBudget(max_items=20, max_bytes=64_000),
         )
-        task = TaskSpecification(
-            new_task_id(),
-            task_text,
-            TaskKind.EXPLAIN,
-            RequestedOutput.ANALYSIS,
-        )
-        result = pipeline.execute(ExecuteTask(_project_id(root), task, provider_id))
+        try:
+            result = pipeline.execute(ExecuteTask(_project_id(root), task, provider_id))
+        except Exception as error:
+            controller.fail(_execution_failure_diagnostics(error))
+            raise
+        for stage in (
+            ExecutionStage.BUILD_CONTEXT,
+            ExecutionStage.BUILD_PROMPT,
+            ExecutionStage.INVOKE_PROVIDER,
+            ExecutionStage.VALIDATE_RESPONSE,
+            ExecutionStage.COMPLETE,
+        ):
+            controller.complete_stage(stage)
         self._persist_context(root, result.context_bundle)
         self._persist_prompt(root, result.inference_request)
         return CliCommandResult(
             {
                 "command": "run",
                 "findings": len(result.analysis.findings),
+                "execution_id": str(controller.execution.execution_id),
                 "mode": "analysis_only",
                 "project_root": str(root.path),
                 "request_id": str(result.inference_request.request_id),
@@ -391,40 +440,62 @@ class LocalProjectCommandGateway:
         explicit_config: Path | None = None,
     ) -> CliCommandResult:
         """Generate and persist a validated proposal without applying it."""
-        self._prepare_project_state(root)
-        source = _LocalSource(root.path)
-        result = PatchProposalExecutionPipeline(
-            inventory_storage=FilesystemInventoryStorage(root),
-            index_storage=FilesystemIndexStorage(root),
-            indexer=DeterministicProjectIndexer(source),
-            retriever=SimpleContextRetriever(),
-            context_builder=SimpleContextBuilder(root.path),
-            providers=_provider_registry(
-                root,
-                explicit_config,
-                mock_scenario=MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH,
-            ),
-            source_states=_LocalPatchSourceStates(root.path),
-            proposal_storage=LocalPatchProposalStorage(root),
-            budget=ContextBudget(max_items=20, max_bytes=64_000),
-        ).execute(
-            ExecuteTask(
-                _project_id(root),
-                TaskSpecification(
-                    new_task_id(),
-                    task_text,
-                    TaskKind.MODIFY,
-                    RequestedOutput.PATCH_PROPOSAL,
-                ),
-                provider_id,
-            )
+        task = TaskSpecification(
+            new_task_id(),
+            task_text,
+            TaskKind.MODIFY,
+            RequestedOutput.PATCH_PROPOSAL,
         )
+        controller = ExecutionController(
+            Execution(
+                new_execution_id(),
+                _project_id(root),
+                task.task_id,
+                workflow=ExecutionWorkflow.PATCH,
+            ),
+            FilesystemExecutionControlStorage(root),
+        )
+        controller.complete_stage(ExecutionStage.SCAN)
+        inventory = self._scan(root)
+        controller.complete_stage(ExecutionStage.INDEX, inventory.diagnostics)
+        project_index = self._index_inventory(root, inventory)
+        controller.complete_stage(ExecutionStage.RETRIEVE, project_index.diagnostics)
+        source = _LocalSource(root.path)
+        try:
+            result = PatchProposalExecutionPipeline(
+                inventory_storage=FilesystemInventoryStorage(root),
+                index_storage=FilesystemIndexStorage(root),
+                indexer=DeterministicProjectIndexer(source),
+                retriever=SimpleContextRetriever(),
+                context_builder=SimpleContextBuilder(root.path),
+                providers=_provider_registry(
+                    root,
+                    explicit_config,
+                    mock_scenario=MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH,
+                ),
+                source_states=_LocalPatchSourceStates(root.path),
+                proposal_storage=LocalPatchProposalStorage(root),
+                budget=ContextBudget(max_items=20, max_bytes=64_000),
+            ).execute(ExecuteTask(_project_id(root), task, provider_id))
+        except Exception as error:
+            controller.fail(_execution_failure_diagnostics(error))
+            raise
+        for stage in (
+            ExecutionStage.BUILD_CONTEXT,
+            ExecutionStage.BUILD_PROMPT,
+            ExecutionStage.INVOKE_PROVIDER,
+            ExecutionStage.VALIDATE_RESPONSE,
+            ExecutionStage.BUILD_PROPOSAL,
+            ExecutionStage.AWAIT_APPROVAL,
+        ):
+            controller.complete_stage(stage)
         self._persist_context(root, result.context.context_bundle)
         self._persist_prompt(root, result.inference_request)
         return CliCommandResult(
             {
                 "change_count": len(result.proposal.changes),
                 "command": "run",
+                "execution_id": str(controller.execution.execution_id),
                 "lifecycle_state": result.lifecycle.state.value,
                 "mode": "patch_proposal",
                 "project_root": str(root.path),
@@ -971,6 +1042,13 @@ class LocalProjectCommandGateway:
 
     def _prepare_project_state(self, root: ProjectRoot) -> ProjectIndex:
         inventory = self._scan(root)
+        return self._index_inventory(root, inventory)
+
+    @staticmethod
+    def _index_inventory(
+        root: ProjectRoot,
+        inventory: ProjectInventory,
+    ) -> ProjectIndex:
         return ProjectIndexBuild(
             DeterministicProjectIndexer(_LocalSource(root.path)),
             FilesystemInventoryStorage(root),
@@ -1119,6 +1197,20 @@ def _application_evidence(
 
 def _diagnostics(collection: DiagnosticCollection) -> tuple[dict[str, object], ...]:
     return tuple(item.to_dict() for item in collection)
+
+
+def _execution_failure_diagnostics(error: Exception) -> DiagnosticCollection:
+    return DiagnosticCollection(
+        (
+            Diagnostic(
+                DiagnosticCode("EXECUTION_STAGE_FAILED"),
+                DiagnosticSeverity.ERROR,
+                "The execution could not complete its current stage.",
+                "execution",
+                technical_details=str(error),
+            ),
+        )
+    )
 
 
 def _context_payload(bundle: ContextBundle) -> dict[str, object]:

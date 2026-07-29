@@ -1,10 +1,12 @@
 """Provider-independent ContextForge domain primitives."""
 
 from contextforge.domain.executions import (
+    ANALYSIS_STAGE_ORDER,
     EXECUTION_STAGE_ORDER,
     Execution,
     ExecutionStage,
     ExecutionStatus,
+    ExecutionWorkflow,
 )
 from contextforge.domain.fingerprints import (
     ArtifactFingerprint,
@@ -50,6 +52,7 @@ from contextforge.domain.projects import ProjectIdentity, ProjectState
 from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecification
 
 __all__ = [
+    "ANALYSIS_STAGE_ORDER",
     "EXECUTION_STAGE_ORDER",
     "ApprovalId",
     "ArtifactFingerprint",
@@ -62,6 +65,7 @@ __all__ = [
     "ExecutionId",
     "ExecutionStage",
     "ExecutionStatus",
+    "ExecutionWorkflow",
     "FingerprintOrdering",
     "IndexId",
     "InferenceRequestId",
