@@ -22,7 +22,7 @@ Use Python 3.12 or newer:
 ```bash
 python -m venv .venv
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,providers]"
 ```
 
 ## Development workflow

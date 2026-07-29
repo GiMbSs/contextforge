@@ -37,7 +37,7 @@ contextforge --version
 Install the development toolchain:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,providers]"
 ```
 
 ## Local quality gate

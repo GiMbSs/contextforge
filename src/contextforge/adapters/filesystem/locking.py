@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Protocol, TypedDict, cast
 from uuid import uuid4
 
 from contextforge.project import ProjectRoot
@@ -38,6 +38,29 @@ class _LockPayload(TypedDict):
     owner_pid: int
     owner_token: str
     schema_version: str
+
+
+class _Kernel32(Protocol):
+    """Minimal Win32 process API used by lock recovery."""
+
+    def OpenProcess(
+        self,
+        desired_access: int,
+        inherit_handle: bool,
+        process_id: int,
+    ) -> int: ...
+
+    def GetLastError(self) -> int: ...
+
+    def CloseHandle(self, handle: int) -> int: ...
+
+
+class _WindowsDllLoader(Protocol):
+    kernel32: _Kernel32
+
+
+class _WindowsCtypes(Protocol):
+    windll: _WindowsDllLoader
 
 
 class LocalProjectLock:
@@ -200,13 +223,14 @@ class LocalProjectLock:
     def _windows_process_alive(process_id: int) -> bool:
         import ctypes
 
+        kernel32 = cast("_WindowsCtypes", ctypes).windll.kernel32
         process_query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
+        handle = kernel32.OpenProcess(
             process_query_limited_information,
             False,
             process_id,
         )
         if not handle:
-            return bool(ctypes.windll.kernel32.GetLastError() != 87)
-        ctypes.windll.kernel32.CloseHandle(handle)
+            return bool(kernel32.GetLastError() != 87)
+        kernel32.CloseHandle(handle)
         return True

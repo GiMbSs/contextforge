@@ -49,7 +49,7 @@ docs/planning/       Incremental implementation plan
 ```bash
 python -m venv .venv
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,providers]"
 ```
 
 Run the full quality gate:
