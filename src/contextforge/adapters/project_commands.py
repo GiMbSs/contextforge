@@ -2564,9 +2564,7 @@ def _context_packet(
     max_bytes: int,
 ) -> dict[str, object]:
     bundle = prepared.context_bundle
-    selected = {
-        item.context_item_id: item for item in prepared.retrieval_result.selected_items
-    }
+    selected = {item.context_item_id: item for item in prepared.retrieval_result.selected_items}
     items: list[dict[str, object]] = []
     for item in bundle.items:
         retrieval_item = selected[item.context_item_id]

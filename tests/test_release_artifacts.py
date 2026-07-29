@@ -31,6 +31,12 @@ def dist_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "venv",
         ),
     )
+    stale_build = work_dir / "build"
+    stale_build.mkdir()
+    (stale_build / "__init__.py").write_text(
+        'raise RuntimeError("stale local build package imported")\n',
+        encoding="utf-8",
+    )
     monkeypatch.chdir(work_dir)
     result = subprocess.run(
         [sys.executable, str(work_dir / "scripts" / "build-release.py")],
@@ -97,6 +103,12 @@ def test_release_build_is_reproducible_offline(tmp_path: Path) -> None:
             ".venv",
             "venv",
         ),
+    )
+    stale_build = work_dir / "build"
+    stale_build.mkdir()
+    (stale_build / "__init__.py").write_text(
+        'raise RuntimeError("stale local build package imported")\n',
+        encoding="utf-8",
     )
     command = [sys.executable, str(work_dir / "scripts" / "build-release.py")]
     environment = {"PATH": "", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "315532800"}

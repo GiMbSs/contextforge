@@ -27,8 +27,7 @@ def test_mcp_legacy_handshake_lists_read_only_context_tool() -> None:
 
 def test_mcp_tool_builds_structured_context_packet(tmp_path: Path) -> None:
     (tmp_path / "orders.py").write_text(
-        "def submit_order(order_id: str) -> None:\n"
-        "    validate_order(order_id)\n",
+        "def submit_order(order_id: str) -> None:\n    validate_order(order_id)\n",
         encoding="utf-8",
     )
 
@@ -71,10 +70,7 @@ def test_mcp_tool_returns_self_correctable_argument_error(tmp_path: Path) -> Non
             )
 
         assert result.is_error is True
-        text = " ".join(
-            str(getattr(block, "text", ""))
-            for block in result.content
-        )
+        text = " ".join(str(getattr(block, "text", "")) for block in result.content)
         assert "CF_MCP_INVALID_ARGUMENT" in text
         assert "100" in text
 

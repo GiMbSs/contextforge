@@ -180,6 +180,7 @@ class FilesystemEvaluationCaseExecutor:
         root: Path,
     ) -> CaseEvaluationOutput:
         """Execute the common pipeline against an authorized source or temporary copy."""
+        root = root.resolve(strict=True)
         project_id = ProjectId(
             f"project_{hashlib.sha256(case.fixture_project_id.encode()).hexdigest()[:32]}"
         )

@@ -162,6 +162,19 @@ def test_fixture_fingerprint_is_content_and_path_sensitive(tmp_path: Path) -> No
     assert len({initial, content_changed, path_changed}) == 3
 
 
+def test_fixture_fingerprint_normalizes_text_line_endings(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "module.py"
+    source.write_bytes(b"def run():\n    return 1\n")
+    unix = fingerprint_fixture_project(project)
+
+    source.write_bytes(b"def run():\r\n    return 1\r\n")
+    windows = fingerprint_fixture_project(project)
+
+    assert windows == unix
+
+
 def test_versioned_core_suite_loads_with_expanded_cases() -> None:
     root = Path(__file__).parent / "fixtures" / "evaluation"
 

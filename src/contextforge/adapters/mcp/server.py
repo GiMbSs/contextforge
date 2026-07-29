@@ -26,9 +26,7 @@ def _require_bounded_integer(value: int, name: str, maximum: int) -> int:
     if type(value) is not int:
         raise ContextBridgeError(f"CF_MCP_INVALID_ARGUMENT: {name} must be an integer")
     if not 1 <= value <= maximum:
-        raise ContextBridgeError(
-            f"CF_MCP_INVALID_ARGUMENT: {name} must be between 1 and {maximum}"
-        )
+        raise ContextBridgeError(f"CF_MCP_INVALID_ARGUMENT: {name} must be between 1 and {maximum}")
     return value
 
 

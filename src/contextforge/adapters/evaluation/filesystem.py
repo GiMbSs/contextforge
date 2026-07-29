@@ -114,7 +114,7 @@ def _safe_relative(root: Path, relative: Path, field: str, *, must_be_file: bool
 
 
 def fingerprint_fixture_project(project_root: Path) -> ProjectFingerprint:
-    """Fingerprint regular fixture files by canonical path and raw content."""
+    """Fingerprint fixture paths and content independently of text line endings."""
     if not isinstance(project_root, Path):
         raise TypeError("project_root must be a Path")
     root = project_root.resolve(strict=True)
@@ -139,7 +139,14 @@ def fingerprint_fixture_project(project_root: Path) -> ProjectFingerprint:
             relative = resolved.relative_to(root).as_posix()
         except ValueError as error:
             raise EvaluationSuiteLoadError("fixture project path escaped its root") from error
-        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        content = resolved.read_bytes()
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            canonical_content = content
+        else:
+            canonical_content = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        digest = hashlib.sha256(canonical_content).hexdigest()
         components.extend((f"path={relative}", f"content_sha256={digest}"))
     return fingerprint_project(tuple(components), ordering=FingerprintOrdering.ORDERED)
 

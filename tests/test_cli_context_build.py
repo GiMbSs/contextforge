@@ -14,8 +14,7 @@ def test_context_build_returns_selected_content_and_traceability(tmp_path: Path)
     source = tmp_path / "src"
     source.mkdir()
     (source / "payments.py").write_text(
-        "def authorize_payment(amount: int) -> bool:\n"
-        "    return amount > 0\n",
+        "def authorize_payment(amount: int) -> bool:\n    return amount > 0\n",
         encoding="utf-8",
     )
     (source / "unrelated.py").write_text("COLOR = 'blue'\n", encoding="utf-8")

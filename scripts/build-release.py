@@ -31,6 +31,11 @@ def _run_build(dist_dir: Path) -> list[Path]:
     """Clean dist/ and build without network-dependent isolation."""
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
+    build_dir = Path("build")
+    if build_dir.exists():
+        if not build_dir.is_dir() or build_dir.is_symlink():
+            raise RuntimeError("build must be a regular project directory")
+        shutil.rmtree(build_dir)
     environment = os.environ.copy()
     environment.setdefault("PYTHONHASHSEED", "0")
     environment.setdefault("SOURCE_DATE_EPOCH", str(REPRODUCIBLE_TIMESTAMP))
