@@ -42,12 +42,15 @@ def assess_execution_recovery(
     execution: Execution,
     *,
     task_available: bool = True,
+    invocation_status: str | None = None,
 ) -> ExecutionRecoveryAssessment:
     """Classify recovery without repeating externally observable operations."""
     if not isinstance(execution, Execution):
         raise TypeError("execution must be an Execution")
     if not isinstance(task_available, bool):
         raise TypeError("task_available must be a bool")
+    if invocation_status is not None and not isinstance(invocation_status, str):
+        raise TypeError("invocation_status must be a string or None")
     if execution.status.is_terminal:
         return ExecutionRecoveryAssessment(
             RecoveryDisposition.TERMINAL,
@@ -73,6 +76,11 @@ def assess_execution_recovery(
         return ExecutionRecoveryAssessment(
             RecoveryDisposition.AWAITING_ACTION,
             "Application requires an explicit command and current-state revalidation.",
+        )
+    if execution.stage is ExecutionStage.INVOKE_PROVIDER and invocation_status is None:
+        return ExecutionRecoveryAssessment(
+            RecoveryDisposition.AWAITING_ACTION,
+            "Provider invocation requires the explicit confirmed invoke command.",
         )
     return ExecutionRecoveryAssessment(
         RecoveryDisposition.MANUAL_REVIEW_REQUIRED,

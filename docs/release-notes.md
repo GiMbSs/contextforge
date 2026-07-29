@@ -25,6 +25,8 @@ workflows for building precise, traceable LLM context from a software project.
   whose owner process is confirmed absent.
 - Deterministic execution resumption through prompt reconstruction, with a hard
   stop before any provider invocation.
+- Explicit provider invocation with confirmation, durable response capture, and
+  fail-closed handling of unknown outcomes.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

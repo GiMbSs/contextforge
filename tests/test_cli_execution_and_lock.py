@@ -4,8 +4,10 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+import contextforge.adapters.project_commands as project_commands
 from contextforge.adapters.filesystem import (
     FilesystemExecutionControlStorage,
     LocalProjectLock,
@@ -25,6 +27,7 @@ from contextforge.domain import (
     new_task_id,
 )
 from contextforge.project import ProjectRoot, ProjectRootSource
+from contextforge.provider import DeterministicMockProvider, MockProviderScenario
 
 runner = CliRunner()
 
@@ -162,7 +165,7 @@ def test_execution_resume_reconstructs_only_deterministic_stages(tmp_path: Path)
     assert payload["status"] == "paused_before_provider"
     assert payload["execution"]["stage"] == "invoke_provider"  # type: ignore[index]
     assert payload["execution"]["recovery"]["disposition"] == (  # type: ignore[index]
-        "manual_review_required"
+        "awaiting_action"
     )
     assert (tmp_path / ".contextforge" / "executions" / "latest-context.json").is_file()
     assert (tmp_path / ".contextforge" / "executions" / "latest-prompt.json").is_file()
@@ -211,6 +214,172 @@ def test_execution_resume_rejects_provider_boundary(tmp_path: Path) -> None:
 
     assert result.exit_code == 14
     assert _payload(result)["status"] == "recovery_rejected"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.INVOKE_PROVIDER
+
+
+def test_execution_invoke_requires_confirmation_and_persists_response(
+    tmp_path: Path,
+) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Explain explicit invocation",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    resumed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+    assert resumed.exit_code == 0
+
+    unconfirmed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "invoke",
+            str(execution.execution_id),
+        ],
+    )
+    assert unconfirmed.exit_code == 11
+    assert storage.load_invocation(execution.execution_id) is None
+
+    invoked = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "invoke",
+            str(execution.execution_id),
+            "--confirm",
+        ],
+    )
+
+    assert invoked.exit_code == 0
+    payload = _payload(invoked)
+    assert payload["status"] == "response_persisted"
+    assert payload["execution"]["stage"] == "validate_response"  # type: ignore[index]
+    assert payload["invocation"]["status"] == "received"  # type: ignore[index]
+    assert "content" not in payload["invocation"]["response"]  # type: ignore[index]
+    assert task.task_text not in invoked.stdout
+    invocation = storage.load_invocation(execution.execution_id)
+    assert invocation is not None
+    assert invocation["status"] == "received"
+
+    repeated = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "invoke",
+            str(execution.execution_id),
+            "--confirm",
+        ],
+    )
+    assert repeated.exit_code == 14
+
+
+def test_execution_invoke_never_repeats_an_unknown_provider_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Exercise unknown invocation outcome",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    resumed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+    assert resumed.exit_code == 0
+
+    failing_provider = DeterministicMockProvider(
+        MockProviderScenario.TIMEOUT,
+        datetime(2026, 7, 28, tzinfo=UTC),
+    )
+
+    class _Registry:
+        @staticmethod
+        def get(provider_id: str) -> DeterministicMockProvider | None:
+            return failing_provider if provider_id == "mock-provider" else None
+
+    monkeypatch.setattr(
+        project_commands,
+        "_provider_registry",
+        lambda *_args, **_kwargs: _Registry(),
+    )
+    command = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "execution",
+        "invoke",
+        str(execution.execution_id),
+        "--confirm",
+    ]
+
+    first = runner.invoke(app, command)
+    repeated = runner.invoke(app, command)
+
+    assert first.exit_code == 9
+    assert repeated.exit_code == 9
+    assert _payload(first)["status"] == "outcome_unknown"
+    assert _payload(repeated)["status"] == "outcome_unknown"
+    invocation = storage.load_invocation(execution.execution_id)
+    assert invocation is not None
+    assert invocation["status"] == "submitted"
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None
     assert restored.stage is ExecutionStage.INVOKE_PROVIDER

@@ -30,12 +30,15 @@ from contextforge.domain import (
     TaskSpecification,
 )
 from contextforge.project import ProjectRoot
+from contextforge.prompt import InferenceRequest
+from contextforge.provider import InferenceResponse
 from contextforge.shared import SerializationEnvelope
 
 _SCHEMA_VERSION = "1.0"
 _EXECUTION_SCHEMA = "contextforge.execution"
 _STAGE_SCHEMA = "contextforge.execution_stage"
 _TASK_SCHEMA = "contextforge.execution_task"
+_INVOCATION_SCHEMA = "contextforge.execution_invocation"
 
 
 class ExecutionStorageError(RuntimeError):
@@ -291,6 +294,89 @@ class FilesystemExecutionControlStorage:
             raise ExecutionStorageError("Task record is not bound to the requested execution")
         return task
 
+    def begin_invocation(
+        self,
+        execution: Execution,
+        request: InferenceRequest,
+        provider_id: str,
+    ) -> None:
+        """Durably mark provider submission before the external call starts."""
+        if execution.stage is not ExecutionStage.INVOKE_PROVIDER:
+            raise ExecutionStorageError("Execution is not at the provider boundary")
+        if request.task_id != execution.task_id or request.project_id != execution.project_id:
+            raise ExecutionStorageError("Inference request does not belong to the execution")
+        destination = self._invocation_path(execution.execution_id)
+        if destination.exists():
+            raise ExecutionStorageError("Provider invocation was already attempted")
+        envelope = SerializationEnvelope(
+            _INVOCATION_SCHEMA,
+            _SCHEMA_VERSION,
+            str(request.request_id),
+            self._clock(),
+            "execution-control-v1",
+            {
+                "execution_id": str(execution.execution_id),
+                "provider_id": provider_id,
+                "request_id": str(request.request_id),
+                "response": None,
+                "status": "submitted",
+                "task_id": str(execution.task_id),
+            },
+            {"project_id": str(execution.project_id)},
+        )
+        self._write_atomic(destination, envelope.to_json() + "\n")
+
+    def complete_invocation(
+        self,
+        execution: Execution,
+        response: InferenceResponse,
+    ) -> None:
+        """Persist normalized provider output before workflow advancement."""
+        destination = self._invocation_path(execution.execution_id)
+        if not destination.is_file():
+            raise ExecutionStorageError("Provider invocation was not durably started")
+        existing = self._load_envelope(destination)
+        payload = _object(existing.to_dict()["payload"], "invocation payload")
+        if (
+            existing.schema_name != _INVOCATION_SCHEMA
+            or payload.get("status") != "submitted"
+            or payload.get("execution_id") != str(execution.execution_id)
+            or payload.get("request_id") != str(response.request_id)
+            or payload.get("task_id") != str(response.task_id)
+            or payload.get("provider_id") != response.metadata.provider_id
+        ):
+            raise ExecutionStorageError("Provider response does not match the invocation")
+        payload["status"] = "received"
+        payload["response"] = {
+            "content": response.content,
+            "created_at": response.created_at.isoformat(),
+            "finish_reason": response.finish_reason.value,
+            "finish_state": response.finish_state.value,
+            "provider_id": response.metadata.provider_id,
+            "response_format": response.response_format.value,
+            "response_id": str(response.response_id),
+        }
+        envelope = SerializationEnvelope(
+            _INVOCATION_SCHEMA,
+            _SCHEMA_VERSION,
+            existing.artifact_id,
+            existing.created_at,
+            existing.producer_version,
+            payload,
+            existing.metadata,
+        )
+        self._write_atomic(destination, envelope.to_json() + "\n")
+
+    def load_invocation(self, execution_id: ExecutionId) -> dict[str, object] | None:
+        """Return a detached invocation record for inspection and recovery."""
+        destination = self._invocation_path(execution_id)
+        if not destination.is_file():
+            return None
+        envelope = self._load_envelope(destination)
+        if envelope.schema_name != _INVOCATION_SCHEMA:
+            raise ExecutionStorageError("Record is not a provider invocation")
+        return _object(envelope.to_dict()["payload"], "invocation payload")
+
     def find_by_task(self, task_id: TaskId) -> Execution | None:
         """Find the newest persisted execution correlated with a task."""
         if not self._directory.is_dir():
@@ -338,6 +424,9 @@ class FilesystemExecutionControlStorage:
 
     def _task_path(self, execution_id: ExecutionId) -> Path:
         return self._execution_directory(execution_id) / "task.json"
+
+    def _invocation_path(self, execution_id: ExecutionId) -> Path:
+        return self._execution_directory(execution_id) / "invocation.json"
 
     @staticmethod
     def _load_envelope(destination: Path) -> SerializationEnvelope:

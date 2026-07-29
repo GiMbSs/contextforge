@@ -15,6 +15,8 @@ development are recorded in the Unreleased section.
   restart-safe reconstruction.
 - Added safe deterministic execution resumption that stops before provider
   invocation.
+- Added explicitly confirmed, single-attempt provider invocation with durable
+  submitted and received states.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

@@ -175,6 +175,7 @@ contextforge execution list
 contextforge execution show
 contextforge execution show execution_0123456789abcdef0123456789abcdef
 contextforge execution resume execution_0123456789abcdef0123456789abcdef
+contextforge execution invoke execution_0123456789abcdef0123456789abcdef --confirm
 contextforge execution cancel execution_0123456789abcdef0123456789abcdef
 ```
 
@@ -192,6 +193,15 @@ Bundle, and prompt as needed, then pauses at `invoke_provider`. It does not call
 the configured provider. Continuing beyond that boundary requires a separate
 future action because a previous provider outcome cannot be inferred safely
 after a process interruption.
+
+`execution invoke --confirm` authorizes exactly one external provider call.
+ContextForge writes a durable `submitted` record before transport and persists
+the normalized response before advancing to `validate_response`. If transport
+fails or the process stops after submission, the outcome remains unknown and
+the command will not retry it automatically. Provider response content is
+stored inside the execution directory for later validation, so
+`.contextforge/executions/` may contain sensitive project-derived data even
+though `execution show` exposes only response metadata.
 
 Inspect the project lock:
 

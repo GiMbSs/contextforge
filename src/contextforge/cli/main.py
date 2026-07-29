@@ -213,6 +213,37 @@ def execution_resume(
     _execution_command(ctx, "resume", execution_id)
 
 
+@execution_app.command("invoke")
+def execution_invoke(
+    ctx: typer.Context,
+    execution_id: Annotated[
+        str | None,
+        typer.Argument(help="Execution identifier; defaults to the latest."),
+    ] = None,
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="Authorize one external provider invocation."),
+    ] = False,
+) -> None:
+    """Explicitly invoke the provider once for a prepared execution."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.invoke_execution(
+        root,
+        execution_id,
+        confirmed=confirm,
+        explicit_config=options.config,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
 @lock_app.command("show")
 def lock_show(ctx: typer.Context) -> None:
     """Show non-secret metadata for the current project lock."""

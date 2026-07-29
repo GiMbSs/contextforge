@@ -64,9 +64,17 @@ def test_deterministic_stage_without_task_requires_manual_review() -> None:
 def test_provider_stage_requires_manual_review() -> None:
     execution = _running_at(ExecutionStage.INVOKE_PROVIDER)
 
-    assessment = assess_execution_recovery(execution)
+    assessment = assess_execution_recovery(execution, invocation_status="submitted")
 
     assert assessment.disposition is RecoveryDisposition.MANUAL_REVIEW_REQUIRED
+
+
+def test_unattempted_provider_stage_awaits_explicit_action() -> None:
+    execution = _running_at(ExecutionStage.INVOKE_PROVIDER)
+
+    assessment = assess_execution_recovery(execution)
+
+    assert assessment.disposition is RecoveryDisposition.AWAITING_ACTION
 
 
 def test_patch_waiting_and_apply_require_explicit_action() -> None:

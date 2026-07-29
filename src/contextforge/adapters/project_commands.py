@@ -124,6 +124,7 @@ from contextforge.provider import (
     MOCK_PROVIDER_ID,
     MockProviderScenario,
     ProviderCapabilityProfile,
+    ProviderExecutionContext,
     ProviderPort,
 )
 from contextforge.retrieval import (
@@ -269,6 +270,15 @@ class ProjectCommandGateway(Protocol):
         execution_id: str | None = None,
     ) -> CliCommandResult: ...
 
+    def invoke_execution(
+        self,
+        root: ProjectRoot,
+        execution_id: str | None,
+        *,
+        confirmed: bool,
+        explicit_config: Path | None = None,
+    ) -> CliCommandResult: ...
+
     def manage_lock(
         self,
         root: ProjectRoot,
@@ -325,6 +335,11 @@ class LocalProjectCommandGateway:
         initialized = metadata.is_dir()
         storage = FilesystemExecutionControlStorage(root)
         latest_execution = storage.load_latest(_project_id(root))
+        latest_invocation = (
+            storage.load_invocation(latest_execution.execution_id)
+            if latest_execution is not None
+            else None
+        )
         return CliCommandResult(
             {
                 "command": "status",
@@ -333,6 +348,7 @@ class LocalProjectCommandGateway:
                     _execution_payload(
                         latest_execution,
                         task_available=storage.load_task(latest_execution.execution_id) is not None,
+                        invocation_status=_invocation_status(latest_invocation),
                     )
                     if latest_execution is not None
                     else None
@@ -1095,6 +1111,9 @@ class LocalProjectCommandGateway:
                         _execution_payload(
                             item,
                             task_available=storage.load_task(item.execution_id) is not None,
+                            invocation_status=_invocation_status(
+                                storage.load_invocation(item.execution_id)
+                            ),
                         )
                         for item in storage.list_executions(_project_id(root))
                     ],
@@ -1131,13 +1150,16 @@ class LocalProjectCommandGateway:
                 CliExitCode.INVALID_USAGE,
             )
         stages = storage.load_stage_diagnostics(execution.execution_id)
+        invocation = storage.load_invocation(execution.execution_id)
         return CliCommandResult(
             {
                 "command": f"execution {operation}",
                 "execution": _execution_payload(
                     execution,
                     task_available=storage.load_task(execution.execution_id) is not None,
+                    invocation_status=_invocation_status(invocation),
                 ),
+                "invocation": _invocation_payload(invocation),
                 "stage_outcomes": [
                     {
                         "diagnostics": _diagnostics(item.diagnostics),
@@ -1147,6 +1169,102 @@ class LocalProjectCommandGateway:
                     for item in stages
                 ],
                 "status": "cancelled" if operation == "cancel" else "available",
+            }
+        )
+
+    def invoke_execution(
+        self,
+        root: ProjectRoot,
+        execution_id: str | None,
+        *,
+        confirmed: bool,
+        explicit_config: Path | None = None,
+    ) -> CliCommandResult:
+        storage = FilesystemExecutionControlStorage(root)
+        if execution_id is None:
+            execution = storage.load_latest(_project_id(root))
+        else:
+            try:
+                selected_id = ExecutionId.from_string(execution_id)
+            except (TypeError, ValueError):
+                return _execution_not_found()
+            execution = storage.load_execution(selected_id)
+        if execution is None or execution.project_id != _project_id(root):
+            return _execution_not_found()
+        task = storage.load_task(execution.execution_id)
+        if (
+            execution.stage is not ExecutionStage.INVOKE_PROVIDER
+            or task is None
+            or execution.status.is_terminal
+        ):
+            return CliCommandResult(
+                {"command": "execution invoke", "status": "invocation_rejected"},
+                CliExitCode.PROJECT_STATE_CONFLICT,
+            )
+        if not confirmed:
+            return CliCommandResult(
+                {
+                    "command": "execution invoke",
+                    "execution_id": str(execution.execution_id),
+                    "status": "confirmation_required",
+                },
+                CliExitCode.APPROVAL_REQUIRED,
+            )
+        provider_id = _task_provider_id(task)
+        provider = _provider_registry(root, explicit_config).get(provider_id)
+        if provider is None:
+            return CliCommandResult(
+                {"command": "execution invoke", "status": "provider_unavailable"},
+                CliExitCode.PROVIDER_FAILURE,
+            )
+        lock = LocalProjectLock(root, "provider_invoke")
+        try:
+            lock.acquire()
+            try:
+                prepared = ContextPreparationPipeline(
+                    inventory_storage=FilesystemInventoryStorage(root),
+                    index_storage=FilesystemIndexStorage(root),
+                    indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
+                    retriever=SimpleContextRetriever(),
+                    context_builder=SimpleContextBuilder(root.path),
+                    budget=ContextBudget(max_items=20, max_bytes=64_000),
+                ).prepare(ExecuteTask(execution.project_id, task, provider_id))
+                request = _build_inference_request(execution, task, prepared)
+                storage.begin_invocation(execution, request, provider_id)
+                response = provider.invoke(
+                    request,
+                    ProviderExecutionContext(str(request.request_id)),
+                )
+                storage.complete_invocation(execution, response)
+                controller = ExecutionController.resume(execution, storage)
+                controller.complete_stage(
+                    ExecutionStage.VALIDATE_RESPONSE,
+                    response.diagnostics.collection,
+                )
+            finally:
+                lock.release()
+        except Exception as error:
+            invocation = storage.load_invocation(execution.execution_id)
+            return CliCommandResult(
+                {
+                    "command": "execution invoke",
+                    "invocation": _invocation_payload(invocation),
+                    "status": (
+                        "outcome_unknown" if invocation is not None else "invocation_failed"
+                    ),
+                },
+                CliExitCode.PROVIDER_FAILURE,
+                _diagnostics(_execution_failure_diagnostics(error)),
+            )
+        return CliCommandResult(
+            {
+                "command": "execution invoke",
+                "execution": _execution_payload(
+                    controller.execution,
+                    task_available=True,
+                ),
+                "invocation": _invocation_payload(storage.load_invocation(execution.execution_id)),
+                "status": "response_persisted",
             }
         )
 
@@ -1507,8 +1625,13 @@ def _execution_payload(
     execution: Execution,
     *,
     task_available: bool,
+    invocation_status: str | None = None,
 ) -> dict[str, object]:
-    recovery = assess_execution_recovery(execution, task_available=task_available)
+    recovery = assess_execution_recovery(
+        execution,
+        task_available=task_available,
+        invocation_status=invocation_status,
+    )
     return {
         "completed_stages": [stage.value for stage in execution.completed_stages],
         "execution_id": str(execution.execution_id),
@@ -1530,6 +1653,38 @@ def _execution_payload(
 def _task_provider_id(task: TaskSpecification) -> str:
     provider_id = dict(task.metadata).get("provider_id")
     return provider_id if isinstance(provider_id, str) and provider_id else MOCK_PROVIDER_ID
+
+
+def _invocation_payload(record: dict[str, object] | None) -> dict[str, object] | None:
+    if record is None:
+        return None
+    response = record.get("response")
+    response_summary = None
+    if isinstance(response, dict):
+        response_summary = {
+            key: response.get(key)
+            for key in (
+                "created_at",
+                "finish_reason",
+                "finish_state",
+                "provider_id",
+                "response_format",
+                "response_id",
+            )
+        }
+    return {
+        "provider_id": record.get("provider_id"),
+        "request_id": record.get("request_id"),
+        "response": response_summary,
+        "status": record.get("status"),
+    }
+
+
+def _invocation_status(record: dict[str, object] | None) -> str | None:
+    if record is None:
+        return None
+    status = record.get("status")
+    return status if isinstance(status, str) else "invalid"
 
 
 def _build_inference_request(
