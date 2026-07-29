@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from contextforge.adapters.evaluation import (
     FilesystemEvaluationCaseExecutor,
     FilesystemEvaluationSuiteLoader,
 )
+from contextforge.domain.tasks import RequestedOutput
 from contextforge.evaluation import (
     CaseEvaluationOutput,
     CaseRunStatus,
@@ -94,6 +95,34 @@ def test_runner_captures_production_pipeline_validation_failure_offline() -> Non
     ).run(_suite(), case_ids=("direct-path",))
 
     assert result.cases[0].status is CaseRunStatus.FAILED
-    assert result.cases[0].error_type == "ValueError"
+    assert result.cases[0].error_type == "CaseEvaluationError"
     assert "ContextBundle validation failed" in result.cases[0].error_message
     assert result.metadata.offline is True
+    assert result.run.strategy_results
+    assert result.run.metric_results
+
+
+class _IsolationRecordingExecutor(FilesystemEvaluationCaseExecutor):
+    seen_root: Path | None = None
+
+    def _execute_at_root(
+        self,
+        case: EvaluationCase,
+        root: Path,
+    ) -> CaseEvaluationOutput:
+        assert root.is_dir()
+        self.seen_root = root
+        return CaseEvaluationOutput((), ())
+
+
+def test_patch_cases_execute_only_on_temporary_fixture_copies() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+    original = next(case for case in _suite().cases if case.case_id == "direct-path")
+    patch_case = replace(original, requested_output=RequestedOutput.PATCH_PROPOSAL)
+    executor = _IsolationRecordingExecutor(loader)
+
+    executor.execute(patch_case)
+
+    assert executor.seen_root is not None
+    assert executor.seen_root != loader.fixture_root(original.fixture_project_id)
+    assert not executor.seen_root.exists()

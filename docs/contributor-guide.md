@@ -134,6 +134,23 @@ Before submitting changes:
 - [ ] Diagnostics redact sensitive data.
 - [ ] Documentation and commit messages reference the right specifications.
 
+## Evaluation benchmark changes
+
+The deterministic smoke evaluation runs in CI for Python 3.12 on Linux. Run it
+locally with:
+
+```bash
+contextforge evaluate tests/fixtures/evaluation/suites/core.json \
+  --case direct-path \
+  --minimum required-artifact-recall=1.0 \
+  --output .contextforge/evaluations/latest
+```
+
+Changes to suite judgments, fixture fingerprints, selected smoke cases, or
+thresholds are benchmark changes. Keep those changes visible in the pull
+request, explain the new baseline, and obtain review rather than weakening a
+threshold solely to make CI pass.
+
 ## Security
 
 Report vulnerabilities privately as described in `SECURITY.md`. Never commit

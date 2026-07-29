@@ -354,6 +354,31 @@ contextforge prompt measure
 
 Sensitive context is redacted in these outputs.
 
+## Evaluating context quality
+
+Run a versioned suite offline and write stable JSON and Markdown reports:
+
+```bash
+contextforge evaluate tests/fixtures/evaluation/suites/core.json \
+  --output .contextforge/evaluations/latest
+```
+
+Use repeatable `--case` and `--tag` options to select a smoke subset. Individual
+case failures are recorded in both reports and do not abort later cases.
+
+Regression thresholds are opt-in:
+
+```bash
+contextforge evaluate tests/fixtures/evaluation/suites/core.json \
+  --case direct-path \
+  --minimum required-artifact-recall=1.0 \
+  --output .contextforge/evaluations/latest
+```
+
+A failed threshold exits with code `20`; suite, configuration, or output
+failures exit with code `19`. Evaluation does not invoke a provider by default.
+Patch-oriented fixtures are copied to a temporary directory before execution.
+
 ## Diagnostics and troubleshooting
 
 Run the full local quality gate:

@@ -14,6 +14,12 @@ from contextforge.evaluation.context_metrics import (
     ContextEfficiencyResult,
     evaluate_context_efficiency,
 )
+from contextforge.evaluation.gate import (
+    MetricThreshold,
+    RegressionGateFailure,
+    RegressionGateResult,
+    evaluate_regression_gate,
+)
 from contextforge.evaluation.metrics import (
     artifact_recall,
     complete_evidence_rate,
@@ -51,6 +57,7 @@ from contextforge.evaluation.reporting import (
 )
 from contextforge.evaluation.runner import (
     EVALUATION_RUNNER_VERSION,
+    CaseEvaluationError,
     CaseEvaluationOutput,
     CaseRunRecord,
     CaseRunStatus,
@@ -71,6 +78,7 @@ __all__ = [
     "ArtifactBudgetEstimate",
     "BaselineMetricDelta",
     "BudgetedAllFilesBaseline",
+    "CaseEvaluationError",
     "CaseEvaluationOutput",
     "CaseRunRecord",
     "CaseRunStatus",
@@ -87,6 +95,9 @@ __all__ = [
     "ExplicitOnlyBaseline",
     "LexicalOnlyBaseline",
     "MetricResult",
+    "MetricThreshold",
+    "RegressionGateFailure",
+    "RegressionGateResult",
     "RelevanceJudgment",
     "RelevanceLevel",
     "StrategyResult",
@@ -96,6 +107,7 @@ __all__ = [
     "calculate_baseline_deltas",
     "complete_evidence_rate",
     "evaluate_context_efficiency",
+    "evaluate_regression_gate",
     "evaluate_retrieval_metrics",
     "evaluation_result_document",
     "has_complete_evidence",

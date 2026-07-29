@@ -1,11 +1,17 @@
 """ContextForge command-line entry point."""
 
+import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from contextforge import __version__
+from contextforge.adapters.evaluation import (
+    FilesystemEvaluationCaseExecutor,
+    FilesystemEvaluationReportWriter,
+    FilesystemEvaluationSuiteLoader,
+)
 from contextforge.adapters.project_commands import (
     CliExitCode,
     LocalProjectCommandGateway,
@@ -14,6 +20,12 @@ from contextforge.adapters.project_commands import (
 )
 from contextforge.cli.options import GlobalOptions
 from contextforge.configuration import ProviderConfig
+from contextforge.evaluation import (
+    EvaluationRunner,
+    MetricThreshold,
+    evaluate_regression_gate,
+    sanitize_report_text,
+)
 
 app = typer.Typer(
     name="contextforge",
@@ -326,6 +338,99 @@ def scan(ctx: typer.Context) -> None:
 def index(ctx: typer.Context) -> None:
     """Build a project index from a current scan."""
     _execute_project_command(ctx, "index")
+
+
+def _evaluation_loader(suite_path: Path) -> tuple[FilesystemEvaluationSuiteLoader, Path]:
+    try:
+        resolved = suite_path.resolve(strict=True)
+    except OSError as error:
+        raise ValueError("evaluation suite does not exist") from error
+    if not resolved.is_file():
+        raise ValueError("evaluation suite must be a regular file")
+    for candidate in resolved.parents:
+        if candidate.joinpath("projects").is_dir():
+            return FilesystemEvaluationSuiteLoader(candidate), resolved.relative_to(candidate)
+    raise ValueError("evaluation suite must be below a root containing projects/")
+
+
+def _parse_thresholds(values: list[str] | None) -> tuple[MetricThreshold, ...]:
+    thresholds: list[MetricThreshold] = []
+    for value in values or ():
+        metric_name, separator, serialized_minimum = value.partition("=")
+        if not separator or not metric_name.strip():
+            raise ValueError("thresholds must use METRIC=MINIMUM")
+        try:
+            minimum = float(serialized_minimum)
+        except ValueError as error:
+            raise ValueError("threshold minimum must be numeric") from error
+        thresholds.append(MetricThreshold(metric_name.strip(), minimum))
+    if len({item.metric_name for item in thresholds}) != len(thresholds):
+        raise ValueError("threshold metric names must be unique")
+    return tuple(thresholds)
+
+
+@app.command()
+def evaluate(
+    suite: Annotated[Path, typer.Argument(help="Versioned evaluation suite JSON.")],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="Output path stem for JSON and Markdown reports.",
+        ),
+    ] = Path(".contextforge/evaluations/latest"),
+    case: Annotated[
+        list[str] | None,
+        typer.Option("--case", help="Run only this case identifier; repeatable."),
+    ] = None,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option("--tag", help="Require this case tag; repeatable."),
+    ] = None,
+    minimum: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--minimum",
+            help="Require a primary aggregate METRIC=MINIMUM; repeatable and opt-in.",
+        ),
+    ] = None,
+) -> None:
+    """Run a deterministic, read-only effectiveness evaluation."""
+    try:
+        loader, relative_suite = _evaluation_loader(suite)
+        thresholds = _parse_thresholds(minimum)
+        evaluation_suite = loader.load(relative_suite)
+        result = EvaluationRunner(
+            FilesystemEvaluationCaseExecutor(loader),
+            configuration=(("mode", "offline"),),
+            source_revision=os.environ.get("GITHUB_SHA"),
+        ).run(
+            evaluation_suite,
+            case_ids=tuple(case or ()),
+            tags=tuple(tag or ()),
+        )
+        output_parent = output.parent.resolve()
+        output_parent.mkdir(parents=True, exist_ok=True)
+        paths = FilesystemEvaluationReportWriter(output_parent).write(result, output.name)
+    except (OSError, TypeError, ValueError) as error:
+        typer.echo(f"Evaluation failed: {sanitize_report_text(str(error))}", err=True)
+        raise typer.Exit(int(CliExitCode.EVALUATION_FAILURE)) from error
+
+    typer.echo(
+        f"Evaluation completed: {len(result.cases)} cases, "
+        f"{sum(record.status.value == 'failed' for record in result.cases)} failed"
+    )
+    typer.echo(f"JSON report: {paths.json_path}")
+    typer.echo(f"Markdown report: {paths.markdown_path}")
+    gate = evaluate_regression_gate(result, thresholds)
+    if not gate.passed:
+        for failure in gate.failures:
+            actual = "missing" if failure.actual is None else f"{failure.actual:.6f}"
+            typer.echo(
+                f"Regression: {failure.metric_name}={actual} (minimum {failure.minimum:.6f})",
+                err=True,
+            )
+        raise typer.Exit(int(CliExitCode.EVALUATION_REGRESSION))
 
 
 @app.command()

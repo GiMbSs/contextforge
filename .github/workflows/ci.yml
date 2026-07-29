@@ -51,5 +51,13 @@ jobs:
       - name: Run tests
         run: pytest
 
+      - name: Run deterministic evaluation smoke suite
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: >-
+          contextforge evaluate tests/fixtures/evaluation/suites/core.json
+          --case direct-path
+          --output /tmp/contextforge-evaluation/latest
+          --minimum required-artifact-recall=1.0
+
       - name: Verify package build
         run: python -m build

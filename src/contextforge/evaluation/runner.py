@@ -48,6 +48,14 @@ class EvaluationCaseExecutor(Protocol):
         ...
 
 
+class CaseEvaluationError(RuntimeError):
+    """A later case stage failed after producing valid partial metrics."""
+
+    def __init__(self, message: str, partial_output: CaseEvaluationOutput) -> None:
+        super().__init__(message)
+        self.partial_output = partial_output
+
+
 @dataclass(frozen=True, slots=True)
 class CaseRunRecord:
     """Stable success or failure information for one selected case."""
@@ -133,8 +141,23 @@ class EvaluationRunner:
         records: list[CaseRunRecord] = []
 
         for case in selected:
+            failure: Exception | None = None
             try:
                 output = self.executor.execute(case)
+            except CaseEvaluationError as error:
+                output = error.partial_output
+                failure = error
+            except Exception as error:
+                records.append(
+                    CaseRunRecord(
+                        case.case_id,
+                        CaseRunStatus.FAILED,
+                        type(error).__name__,
+                        str(error) or "Case execution failed",
+                    )
+                )
+                continue
+            try:
                 if any(item.case_id != case.case_id for item in output.strategy_results):
                     raise ValueError("Case executor returned a strategy result for another case")
                 if any(item.case_id != case.case_id for item in output.metric_results):
@@ -152,7 +175,6 @@ class EvaluationRunner:
                     raise ValueError("Case executor returned duplicate metric results")
                 strategy_results.extend(output.strategy_results)
                 metric_results.extend(output.metric_results)
-                records.append(CaseRunRecord(case.case_id, CaseRunStatus.COMPLETED))
             except Exception as error:
                 records.append(
                     CaseRunRecord(
@@ -160,6 +182,18 @@ class EvaluationRunner:
                         CaseRunStatus.FAILED,
                         type(error).__name__,
                         str(error) or "Case execution failed",
+                    )
+                )
+                continue
+            if failure is None:
+                records.append(CaseRunRecord(case.case_id, CaseRunStatus.COMPLETED))
+            else:
+                records.append(
+                    CaseRunRecord(
+                        case.case_id,
+                        CaseRunStatus.FAILED,
+                        type(failure).__name__,
+                        str(failure),
                     )
                 )
 

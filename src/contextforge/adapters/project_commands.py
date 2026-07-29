@@ -175,6 +175,8 @@ class CliExitCode(IntEnum):
     OPERATION_CANCELLED = 16
     PARTIAL_RESULT = 17
     UNSUPPORTED_CAPABILITY = 18
+    EVALUATION_FAILURE = 19
+    EVALUATION_REGRESSION = 20
 
 
 @dataclass(frozen=True, slots=True)

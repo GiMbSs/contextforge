@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +22,7 @@ from contextforge.domain.tasks import TaskSpecification
 from contextforge.evaluation import (
     ArtifactBudgetEstimate,
     BudgetedAllFilesBaseline,
+    CaseEvaluationError,
     CaseEvaluationOutput,
     EvaluationCase,
     EvaluationStrategy,
@@ -95,6 +98,19 @@ class FilesystemEvaluationCaseExecutor:
         root = self.loader.fixture_root(case.fixture_project_id)
         if fingerprint_fixture_project(root) != case.fixture_fingerprint:
             raise ValueError("Fixture fingerprint does not match the evaluation case")
+        if case.requested_output.value == "patch_proposal" or case.expected_changed_paths:
+            with tempfile.TemporaryDirectory(prefix="contextforge-evaluation-") as temporary:
+                isolated = Path(temporary) / "fixture"
+                shutil.copytree(root, isolated)
+                return self._execute_at_root(case, isolated)
+        return self._execute_at_root(case, root)
+
+    def _execute_at_root(
+        self,
+        case: EvaluationCase,
+        root: Path,
+    ) -> CaseEvaluationOutput:
+        """Execute the common pipeline against an authorized source or temporary copy."""
         project_id = ProjectId(
             f"project_{hashlib.sha256(case.fixture_project_id.encode()).hexdigest()[:32]}"
         )
@@ -116,8 +132,6 @@ class FilesystemEvaluationCaseExecutor:
             RetrievalRequest(_stable_task(case), project_index, case.context_budget)
         )
         primary = self._primary_result(case, project_index.indexed_artifacts, retrieval)
-        bundle = SimpleContextBuilder(root).build(retrieval, project_id=project_id)
-
         strategy_results = [primary]
         strategy_results.extend(strategy.evaluate(request) for strategy in self.baseline_strategies)
         metrics = [
@@ -125,6 +139,11 @@ class FilesystemEvaluationCaseExecutor:
             for result in strategy_results
             for metric in evaluate_retrieval_metrics(case, result)
         ]
+        partial_output = CaseEvaluationOutput(tuple(strategy_results), tuple(metrics))
+        try:
+            bundle = SimpleContextBuilder(root).build(retrieval, project_id=project_id)
+        except (OSError, ValueError) as error:
+            raise CaseEvaluationError(str(error), partial_output) from error
         metrics.extend(
             evaluate_context_efficiency(
                 case,
