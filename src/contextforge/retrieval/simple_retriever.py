@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from contextforge.diagnostics import (
@@ -13,7 +13,15 @@ from contextforge.diagnostics import (
     DiagnosticSeverity,
 )
 from contextforge.domain import ArtifactId, RetrievalId, new_retrieval_id
-from contextforge.indexer import IndexedArtifact, SearchUnit, SourceLocation, Symbol
+from contextforge.indexer import (
+    IndexedArtifact,
+    ProjectIndex,
+    RelationshipKind,
+    RelationshipResolution,
+    SearchUnit,
+    SourceLocation,
+    Symbol,
+)
 from contextforge.retrieval.models import (
     CandidateEligibility,
     CandidateOutcome,
@@ -32,7 +40,7 @@ from contextforge.retrieval.models import (
 )
 from contextforge.retrieval.query import TaskQueryNormalizer
 
-SIMPLE_RETRIEVER_VERSION = "simple-retriever-v3"
+SIMPLE_RETRIEVER_VERSION = "simple-retriever-v4"
 
 _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "composed": ("configuration", "settings"),
@@ -104,6 +112,8 @@ class _ScoredCandidate:
     content_hits: tuple[str, ...]
     content_fingerprint: str | None = None
     historical_penalty: int = 0
+    structural_hits: tuple[str, ...] = ()
+    structural_boost: int = 0
 
 
 class SimpleContextRetriever:
@@ -161,6 +171,7 @@ class SimpleContextRetriever:
                 keywords, artifact_by_id, units_by_artifact, request.project_index.symbols
             )
         )
+        candidates = self._boost_structural_dependencies(candidates, request.project_index)
 
         if not candidates:
             return self._empty_result(request)
@@ -240,6 +251,66 @@ class SimpleContextRetriever:
                 )
             )
         return scored
+
+    @staticmethod
+    def _boost_structural_dependencies(
+        candidates: list[_ScoredCandidate],
+        project_index: ProjectIndex,
+    ) -> list[_ScoredCandidate]:
+        """Boost verified direct dependencies of the strongest lexical artifacts."""
+        maximum = max((candidate.score for candidate in candidates), default=0)
+        if maximum <= 0:
+            return candidates
+        seed_artifacts = {
+            candidate.artifact_id
+            for candidate in candidates
+            if candidate.score == maximum and candidate.historical_penalty == 0
+        }
+        entity_artifacts: dict[str, ArtifactId] = {
+            str(artifact.artifact_id): artifact.artifact_id
+            for artifact in project_index.indexed_artifacts
+        }
+        entity_artifacts.update(
+            (symbol.symbol_id, symbol.artifact_id) for symbol in project_index.symbols
+        )
+        allowed_kinds = {
+            RelationshipKind.CALLS,
+            RelationshipKind.CONFIGURES,
+            RelationshipKind.DEPENDS_ON,
+            RelationshipKind.IMPORTS,
+            RelationshipKind.REFERENCES,
+        }
+        hits_by_artifact: dict[ArtifactId, list[str]] = {}
+        for relationship in project_index.relationships:
+            if (
+                relationship.resolution is not RelationshipResolution.RESOLVED_INTERNAL
+                or relationship.kind not in allowed_kinds
+                or entity_artifacts.get(relationship.source_reference) not in seed_artifacts
+            ):
+                continue
+            target_artifact = entity_artifacts.get(relationship.target_reference)
+            if target_artifact is None or target_artifact in seed_artifacts:
+                continue
+            hits_by_artifact.setdefault(target_artifact, []).append(relationship.relationship_id)
+        boosted: list[_ScoredCandidate] = []
+        for candidate in candidates:
+            hits = tuple(sorted(set(hits_by_artifact.get(candidate.artifact_id, ()))))
+            if not hits or candidate.historical_penalty:
+                boosted.append(candidate)
+                continue
+            boosted_score = min(
+                candidate.score + 4 * len(hits),
+                max(0, maximum - 1),
+            )
+            boosted.append(
+                replace(
+                    candidate,
+                    score=boosted_score,
+                    structural_hits=hits,
+                    structural_boost=boosted_score - candidate.score,
+                )
+            )
+        return boosted
 
     def _score_symbols(
         self,
@@ -635,7 +706,9 @@ class SimpleContextRetriever:
             f"path_hits={','.join(candidate.path_hits) or 'none'};"
             f"name_hits={','.join(candidate.name_hits) or 'none'};"
             f"content_hits={','.join(candidate.content_hits) or 'none'};"
-            f"historical_penalty={candidate.historical_penalty}"
+            f"historical_penalty={candidate.historical_penalty};"
+            f"structural_hits={','.join(candidate.structural_hits) or 'none'};"
+            f"structural_boost={candidate.structural_boost}"
         )
         return RetrievalEvidence(
             evidence_type="simple-lexical",
@@ -652,6 +725,7 @@ class SimpleContextRetriever:
             ("path", float(3 * len(candidate.path_hits))),
             ("name", float(6 * len(candidate.name_hits))),
             ("content", float(len(candidate.content_hits))),
+            ("structural", float(candidate.structural_boost)),
             ("historical_penalty", float(-candidate.historical_penalty)),
         )
 

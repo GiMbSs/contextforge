@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid5
 
@@ -29,8 +29,10 @@ from contextforge.indexer.models import (
     IndexStatus,
     ProjectIndex,
     Relationship,
+    RelationshipResolution,
     SearchUnit,
     Symbol,
+    SymbolKind,
 )
 from contextforge.indexer.ports import ProjectSource
 from contextforge.indexer.python_ast import (
@@ -136,6 +138,60 @@ def _strategy_versions(configuration: ProjectIndexerConfig) -> tuple[str, ...]:
         PYTHON_SEARCH_STRATEGY_VERSION,
         GENERIC_TEXT_STRATEGY_VERSION,
     )
+
+
+def _resolve_internal_relationships(
+    relationships: list[Relationship],
+    symbols: list[Symbol],
+) -> list[Relationship]:
+    """Resolve unique Python module/name references against the complete index."""
+    qualified = tuple(symbol for symbol in symbols if symbol.qualified_name is not None)
+    resolved: list[Relationship] = []
+    for relationship in relationships:
+        if relationship.resolution is not RelationshipResolution.UNRESOLVED:
+            resolved.append(relationship)
+            continue
+        prefix, separator, raw_target = relationship.target_reference.partition(":")
+        if not separator or prefix not in {"python-module", "python-name"}:
+            resolved.append(relationship)
+            continue
+        target = raw_target.lstrip(".")
+        matches = tuple(
+            symbol
+            for symbol in qualified
+            if symbol.qualified_name is not None
+            and (symbol.qualified_name == target or symbol.qualified_name.endswith(f".{target}"))
+        )
+        if not matches and prefix == "python-module" and "." in target:
+            module_target = target.rsplit(".", 1)[0]
+            matches = tuple(
+                symbol
+                for symbol in qualified
+                if symbol.kind is SymbolKind.MODULE
+                and symbol.qualified_name is not None
+                and (
+                    symbol.qualified_name == module_target
+                    or symbol.qualified_name.endswith(f".{module_target}")
+                )
+            )
+        if len(matches) == 1:
+            resolved.append(
+                replace(
+                    relationship,
+                    target_reference=matches[0].symbol_id,
+                    resolution=RelationshipResolution.RESOLVED_INTERNAL,
+                )
+            )
+        elif len(matches) > 1:
+            resolved.append(
+                replace(
+                    relationship,
+                    resolution=RelationshipResolution.AMBIGUOUS,
+                )
+            )
+        else:
+            resolved.append(relationship)
+    return resolved
 
 
 def _index_id(
@@ -308,6 +364,7 @@ class DeterministicProjectIndexer:
                 )
             )
 
+        relationships = _resolve_internal_relationships(relationships, symbols)
         symbols.sort(
             key=lambda item: (
                 item.artifact_id.value,
@@ -487,6 +544,7 @@ class DeterministicProjectIndexer:
             symbols.extend(changed_index.symbols)
             relationships.extend(changed_index.relationships)
             search_units.extend(changed_index.search_units)
+        relationships = _resolve_internal_relationships(relationships, symbols)
         symbols.sort(
             key=lambda item: (
                 item.artifact_id.value,

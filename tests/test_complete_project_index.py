@@ -20,6 +20,8 @@ from contextforge.indexer import (
     IndexStatus,
     InMemoryIndexStorage,
     ProjectIndexQuery,
+    RelationshipKind,
+    RelationshipResolution,
 )
 from contextforge.scanner import (
     ArtifactAvailability,
@@ -152,6 +154,33 @@ def test_syntax_error_does_not_abort_unrelated_artifact() -> None:
     assert tuple(record.state for record in project_index.indexed_artifacts) == (
         IndexingState.FAILED,
         IndexingState.FULLY_INDEXED,
+    )
+
+
+def test_unique_cross_file_imports_are_resolved_to_internal_symbols() -> None:
+    project_id = new_project_id()
+    app = b"from service import format_greeting\n\ndef greet():\n    return format_greeting()\n"
+    service = b"def format_greeting():\n    return 'hello'\n"
+    artifacts = (
+        make_artifact(project_id, "src/app.py", app),
+        make_artifact(project_id, "src/service.py", service),
+    )
+    project_index = DeterministicProjectIndexer(
+        MappingProjectSource({"src/app.py": app, "src/service.py": service}),
+        clock=lambda: NOW,
+    ).index(IndexRequest(make_inventory(artifacts, project_id)))
+    target = next(symbol for symbol in project_index.symbols if symbol.name == "format_greeting")
+
+    imports = tuple(
+        relationship
+        for relationship in project_index.relationships
+        if relationship.kind is RelationshipKind.DEPENDS_ON
+    )
+
+    assert any(
+        relationship.target_reference == target.symbol_id
+        and relationship.resolution is RelationshipResolution.RESOLVED_INTERNAL
+        for relationship in imports
     )
 
 

@@ -19,6 +19,9 @@ from contextforge.indexer import (
     IndexedArtifact,
     IndexingState,
     ProjectIndex,
+    Relationship,
+    RelationshipKind,
+    RelationshipResolution,
     SearchUnit,
     SearchUnitKind,
     SourceLocation,
@@ -138,7 +141,7 @@ def test_retriever_expands_reviewed_semantic_aliases_deterministically() -> None
     )
 
     assert result.selected_items[0].content_reference == "src/service.py"
-    assert result.strategy_versions[0] == "simple-retriever-v3"
+    assert result.strategy_versions[0] == "simple-retriever-v4"
 
 
 def test_retriever_suppresses_historical_distractors_for_runtime_tasks() -> None:
@@ -201,6 +204,39 @@ def test_historical_marker_applies_to_every_unit_in_the_artifact() -> None:
     )
 
     assert tuple(item.content_reference for item in result.selected_items) == ("src/service.py",)
+
+
+def test_resolved_structural_dependencies_receive_a_traceable_boost() -> None:
+    index = _make_index(
+        (
+            ("unit_entry", "src/entry.py", "entry point"),
+            ("unit_support", "src/support.py", "support implementation"),
+        )
+    )
+    source, target = index.indexed_artifacts
+    relationship = Relationship(
+        "relationship_structural_boost",
+        str(source.artifact_id),
+        str(target.artifact_id),
+        RelationshipKind.DEPENDS_ON,
+        "test:resolved-dependency",
+        resolution=RelationshipResolution.RESOLVED_INTERNAL,
+    )
+    index = replace(index, relationships=(relationship,))
+
+    result = SimpleContextRetriever().retrieve(
+        _request("explain the entry point", index, max_artifacts=2)
+    )
+
+    assert {item.content_reference for item in result.selected_items} == {
+        "src/entry.py",
+        "src/support.py",
+    }
+    support = next(
+        item for item in result.selected_items if item.content_reference == "src/support.py"
+    )
+    assert dict(support.score_breakdown)["structural"] == 4.0
+    assert "relationship_structural_boost" in support.rationale.evidence[0].detail
 
 
 def test_retriever_falls_back_to_smallest_artifacts_when_no_match() -> None:
