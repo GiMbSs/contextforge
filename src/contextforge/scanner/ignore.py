@@ -41,10 +41,15 @@ DEFAULT_EXCLUSION_PATTERNS: tuple[str, ...] = (
     "venv/",
     "env/",
     "__pycache__/",
+    ".hypothesis/",
     ".pytest_cache/",
     ".mypy_cache/",
     ".ruff_cache/",
+    ".tox/",
+    ".nox/",
+    ".coverage",
     "coverage/",
+    "htmlcov/",
     "dist/",
     "build/",
     "target/",
@@ -52,6 +57,7 @@ DEFAULT_EXCLUSION_PATTERNS: tuple[str, ...] = (
     ".cache/",
     ".idea/",
     ".vscode/",
+    ".worktrees/",
 )
 
 

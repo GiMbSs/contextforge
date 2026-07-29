@@ -52,7 +52,7 @@ def test_traversal_returns_deterministic_canonical_order(tmp_path: Path) -> None
 
 
 def test_default_policy_prunes_git_venv_and_build_outputs(tmp_path: Path) -> None:
-    for directory in (".git", ".venv", "build"):
+    for directory in (".git", ".hypothesis", ".venv", ".worktrees", "build"):
         target = tmp_path / directory
         target.mkdir()
         (target / "ignored.txt").write_text("ignored", encoding="utf-8")
