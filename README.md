@@ -64,6 +64,25 @@ contextforge evaluate tests/fixtures/evaluation/suites/core.json \
   --output .contextforge/evaluations/core
 ```
 
+## Codex CLI bridge
+
+Register ContextForge as a local, read-only MCP server in Codex:
+
+```bash
+contextforge init
+contextforge mcp install-codex
+contextforge mcp doctor
+```
+
+Preview the exact registration without changing Codex with
+`contextforge mcp install-codex --dry-run`. Add `--format json` before `mcp`
+for machine-readable installation and diagnostic output.
+
+The registration is tied to the Python environment that runs ContextForge.
+Re-run the installation command after moving or recreating that environment.
+See [the Codex integration guide](docs/integrations/codex.md) for the recommended
+project instructions and troubleshooting flow.
+
 ## Project structure
 
 ```text

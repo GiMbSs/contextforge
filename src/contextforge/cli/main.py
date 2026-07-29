@@ -12,7 +12,12 @@ from contextforge.adapters.evaluation import (
     FilesystemEvaluationReportWriter,
     FilesystemEvaluationSuiteLoader,
 )
-from contextforge.adapters.mcp import register_codex_server, render_shell_command, serve_mcp
+from contextforge.adapters.mcp import (
+    diagnose_codex_bridge,
+    register_codex_server,
+    render_shell_command,
+    serve_mcp,
+)
 from contextforge.adapters.project_commands import (
     CliExitCode,
     LocalProjectCommandGateway,
@@ -197,6 +202,27 @@ def mcp_install_codex(
     typer.echo(f"Status: {result.status}")
     typer.echo(result.message)
     typer.echo(f"Command: {render_shell_command(result.registration_command)}")
+
+
+@mcp_app.command("doctor")
+def mcp_doctor(ctx: typer.Context) -> None:
+    """Verify the Codex registration and exercise the MCP bridge over stdio."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None or root is None:
+        typer.echo("CF_MCP_PROJECT_RESOLUTION_FAILED: project root could not be resolved", err=True)
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    report = diagnose_codex_bridge(root.path)
+    if options.output_format == "json":
+        import json
+
+        typer.echo(json.dumps(report.to_dict(), sort_keys=True))
+    else:
+        typer.echo(f"Status: {'ready' if report.succeeded else 'failed'}")
+        for check in report.checks:
+            typer.echo(f"[{check.status}] {check.name}: {check.message}")
+    if not report.succeeded:
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE))
 
 
 def _execution_command(
