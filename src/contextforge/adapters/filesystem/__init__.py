@@ -8,6 +8,7 @@ from contextforge.adapters.filesystem.initialization import LocalProjectInitiali
 from contextforge.adapters.filesystem.local import LocalProjectTraversal
 from contextforge.adapters.filesystem.locking import (
     LocalProjectLock,
+    ProjectLockInfo,
     ProjectLockOwnershipError,
     ProjectLockUnavailableError,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "LocalProjectTraversal",
     "LocalStagedPatchApplication",
     "PreflightEvidenceProvider",
+    "ProjectLockInfo",
     "ProjectLockOwnershipError",
     "ProjectLockUnavailableError",
     "ProjectStateStorageError",

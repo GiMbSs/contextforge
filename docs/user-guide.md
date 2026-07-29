@@ -163,6 +163,28 @@ application completes it. Patch application holds an exclusive project lock;
 a concurrent application fails with a project-state conflict instead of
 mutating files concurrently.
 
+Inspect or cancel a persisted execution:
+
+```bash
+contextforge execution show
+contextforge execution show execution_0123456789abcdef0123456789abcdef
+contextforge execution cancel execution_0123456789abcdef0123456789abcdef
+```
+
+Inspect the project lock:
+
+```bash
+contextforge lock show
+```
+
+Locks are never removed merely because they are old. If a process terminated
+without releasing its lock, recovery must be explicit and succeeds only when
+the minimum age has elapsed and the recorded process is confirmed absent:
+
+```bash
+contextforge lock recover --force --minimum-age-seconds 3600
+```
+
 ## Analysis task
 
 Run a read-only analysis task:

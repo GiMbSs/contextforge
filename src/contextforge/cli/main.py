@@ -32,6 +32,10 @@ patch_app = typer.Typer(help="Inspect persisted patch proposals.")
 app.add_typer(patch_app, name="patch")
 config_app = typer.Typer(help="Inspect and update effective configuration.")
 app.add_typer(config_app, name="config")
+execution_app = typer.Typer(help="Inspect and cancel persisted executions.")
+app.add_typer(execution_app, name="execution")
+lock_app = typer.Typer(help="Inspect and explicitly recover project locks.")
+app.add_typer(lock_app, name="lock")
 
 
 def _version_callback(value: bool) -> None:
@@ -147,6 +151,98 @@ def initialize(
 def status(ctx: typer.Context) -> None:
     """Display foundational ContextForge project state."""
     _execute_project_command(ctx, "status")
+
+
+def _execution_command(
+    ctx: typer.Context,
+    operation: str,
+    execution_id: str | None,
+) -> None:
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.inspect_execution(root, operation, execution_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
+@execution_app.command("show")
+def execution_show(
+    ctx: typer.Context,
+    execution_id: Annotated[
+        str | None,
+        typer.Argument(help="Execution identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Show a persisted execution and its stage outcomes."""
+    _execution_command(ctx, "show", execution_id)
+
+
+@execution_app.command("cancel")
+def execution_cancel(
+    ctx: typer.Context,
+    execution_id: Annotated[
+        str | None,
+        typer.Argument(help="Execution identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Cancel a persisted running execution."""
+    _execution_command(ctx, "cancel", execution_id)
+
+
+@lock_app.command("show")
+def lock_show(ctx: typer.Context) -> None:
+    """Show non-secret metadata for the current project lock."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.manage_lock(root, "show")
+    render_result(result, output_format=options.output_format)
+
+
+@lock_app.command("recover")
+def lock_recover(
+    ctx: typer.Context,
+    minimum_age_seconds: Annotated[
+        int,
+        typer.Option(
+            "--minimum-age-seconds",
+            min=1,
+            help="Require the lock to be at least this old.",
+        ),
+    ] = 3600,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Confirm explicit abandoned-lock recovery."),
+    ] = False,
+) -> None:
+    """Recover an old lock only after confirming its owner process is dead."""
+    options = ctx.ensure_object(GlobalOptions)
+    if not force:
+        raise typer.BadParameter("--force is required for lock recovery")
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.manage_lock(
+        root,
+        "recover",
+        minimum_age_seconds=minimum_age_seconds,
+    )
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
 
 
 @app.command()

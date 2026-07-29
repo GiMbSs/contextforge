@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from contextforge.adapters.filesystem import (
     ProjectLockUnavailableError,
 )
 from contextforge.project import ProjectRoot, ProjectRootSource
+
+NOW = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
 
 
 def _root(path: Path) -> ProjectRoot:
@@ -53,3 +56,37 @@ def test_lock_cannot_remove_another_owners_record(tmp_path: Path) -> None:
         lock.release()
 
     assert destination.is_file()
+
+
+def test_abandoned_lock_recovery_requires_age_and_dead_owner(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    lock = LocalProjectLock(root, "patch_apply", clock=lambda: NOW - timedelta(hours=2))
+    lock.acquire()
+
+    with pytest.raises(ProjectLockUnavailableError, match="still active"):
+        LocalProjectLock.recover_abandoned(
+            root,
+            clock=lambda: NOW,
+            process_alive=lambda _pid: True,
+        )
+
+    recovered = LocalProjectLock.recover_abandoned(
+        root,
+        clock=lambda: NOW,
+        process_alive=lambda _pid: False,
+    )
+
+    assert recovered.operation == "patch_apply"
+    assert LocalProjectLock.inspect(root) is None
+
+
+def test_recent_abandoned_lock_is_not_recovered(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    LocalProjectLock(root, "patch_apply", clock=lambda: NOW).acquire()
+
+    with pytest.raises(ProjectLockUnavailableError, match="not old enough"):
+        LocalProjectLock.recover_abandoned(
+            root,
+            clock=lambda: NOW + timedelta(minutes=5),
+            process_alive=lambda _pid: False,
+        )

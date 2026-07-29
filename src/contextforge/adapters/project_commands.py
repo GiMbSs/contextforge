@@ -28,6 +28,8 @@ from contextforge.adapters.filesystem import (
     LocalProjectLock,
     LocalProjectScanner,
     LocalStagedPatchApplication,
+    ProjectLockInfo,
+    ProjectLockOwnershipError,
     ProjectLockUnavailableError,
 )
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
@@ -77,6 +79,7 @@ from contextforge.diagnostics import (
 from contextforge.domain import (
     ArtifactPath,
     Execution,
+    ExecutionId,
     ExecutionStage,
     ExecutionWorkflow,
     PatchProposalId,
@@ -244,6 +247,21 @@ class ProjectCommandGateway(Protocol):
         root: ProjectRoot,
         *,
         explicit: Path | None = None,
+    ) -> CliCommandResult: ...
+
+    def inspect_execution(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        execution_id: str | None = None,
+    ) -> CliCommandResult: ...
+
+    def manage_lock(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        minimum_age_seconds: int = 3600,
     ) -> CliCommandResult: ...
 
 
@@ -1045,6 +1063,107 @@ class LocalProjectCommandGateway:
             ),
         )
 
+    def inspect_execution(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        execution_id: str | None = None,
+    ) -> CliCommandResult:
+        storage = FilesystemExecutionControlStorage(root)
+        if execution_id is None:
+            execution = storage.load_latest(_project_id(root))
+        else:
+            try:
+                selected_id = ExecutionId.from_string(execution_id)
+            except (TypeError, ValueError):
+                return _execution_not_found()
+            execution = storage.load_execution(selected_id)
+        if execution is None:
+            return _execution_not_found()
+        if operation == "cancel":
+            try:
+                ExecutionController.resume(execution, storage).cancel()
+            except Exception as error:
+                return CliCommandResult(
+                    {"status": "failed"},
+                    CliExitCode.PROJECT_STATE_CONFLICT,
+                    _diagnostics(_execution_failure_diagnostics(error)),
+                )
+            execution = storage.load_execution(execution.execution_id) or execution
+        elif operation != "show":
+            return CliCommandResult(
+                {"status": "failed"},
+                CliExitCode.INVALID_USAGE,
+            )
+        stages = storage.load_stage_diagnostics(execution.execution_id)
+        return CliCommandResult(
+            {
+                "command": f"execution {operation}",
+                "execution": {
+                    "completed_stages": [stage.value for stage in execution.completed_stages],
+                    "execution_id": str(execution.execution_id),
+                    "project_id": str(execution.project_id),
+                    "stage": execution.stage.value,
+                    "status": execution.status.value,
+                    "task_id": str(execution.task_id),
+                    "workflow": execution.workflow.value,
+                },
+                "stage_outcomes": [
+                    {
+                        "diagnostics": _diagnostics(item.diagnostics),
+                        "outcome": item.outcome.value,
+                        "stage": item.stage.value,
+                    }
+                    for item in stages
+                ],
+                "status": "cancelled" if operation == "cancel" else "available",
+            }
+        )
+
+    def manage_lock(
+        self,
+        root: ProjectRoot,
+        operation: str,
+        *,
+        minimum_age_seconds: int = 3600,
+    ) -> CliCommandResult:
+        try:
+            if operation == "show":
+                lock = LocalProjectLock.inspect(root)
+                return CliCommandResult(
+                    {
+                        "command": "lock show",
+                        "lock": _lock_payload(lock),
+                        "status": "locked" if lock is not None else "unlocked",
+                    }
+                )
+            if operation == "recover":
+                recovered = LocalProjectLock.recover_abandoned(
+                    root,
+                    minimum_age_seconds=minimum_age_seconds,
+                )
+                return CliCommandResult(
+                    {
+                        "command": "lock recover",
+                        "recovered_lock": _lock_payload(recovered),
+                        "status": "recovered",
+                    }
+                )
+        except (ProjectLockUnavailableError, ProjectLockOwnershipError) as error:
+            return CliCommandResult(
+                {"status": "failed"},
+                CliExitCode.PROJECT_STATE_CONFLICT,
+                (
+                    {
+                        "capability": "project_lock",
+                        "code": "CLI_PROJECT_LOCK_RECOVERY_REJECTED",
+                        "message": str(error),
+                        "severity": "error",
+                    },
+                ),
+            )
+        return CliCommandResult({"status": "failed"}, CliExitCode.INVALID_USAGE)
+
     @staticmethod
     def _persist_context(root: ProjectRoot, bundle: ContextBundle) -> None:
         execution_directory = root.path / ".contextforge" / "executions"
@@ -1254,6 +1373,31 @@ def _execution_failure_diagnostics(error: Exception) -> DiagnosticCollection:
             ),
         )
     )
+
+
+def _execution_not_found() -> CliCommandResult:
+    return CliCommandResult(
+        {"status": "failed"},
+        CliExitCode.GENERAL_FAILURE,
+        (
+            {
+                "capability": "execution",
+                "code": "CLI_EXECUTION_NOT_FOUND",
+                "message": "The requested execution is unavailable.",
+                "severity": "error",
+            },
+        ),
+    )
+
+
+def _lock_payload(lock: ProjectLockInfo | None) -> dict[str, object] | None:
+    if lock is None:
+        return None
+    return {
+        "acquired_at": lock.acquired_at.isoformat(),
+        "operation": lock.operation,
+        "owner_pid": lock.owner_pid,
+    }
 
 
 def _patch_execution_controller(

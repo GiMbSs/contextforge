@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import TypedDict, cast
 from uuid import uuid4
 
 from contextforge.project import ProjectRoot
@@ -17,6 +21,23 @@ class ProjectLockUnavailableError(RuntimeError):
 
 class ProjectLockOwnershipError(RuntimeError):
     """A process attempted to release a lock it does not own."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectLockInfo:
+    """Non-secret metadata describing the current project lock."""
+
+    operation: str
+    owner_pid: int
+    acquired_at: datetime
+
+
+class _LockPayload(TypedDict):
+    acquired_at: str
+    operation: str
+    owner_pid: int
+    owner_token: str
+    schema_version: str
 
 
 class LocalProjectLock:
@@ -93,3 +114,99 @@ class LocalProjectLock:
 
     def __exit__(self, *_error: object) -> None:
         self.release()
+
+    @classmethod
+    def inspect(cls, root: ProjectRoot) -> ProjectLockInfo | None:
+        """Inspect lock metadata without acquiring or modifying the lock."""
+        path = root.path / ".contextforge" / "locks" / "project.lock"
+        if not path.is_file():
+            return None
+        payload, _serialized = cls._read_lock(path)
+        return ProjectLockInfo(
+            operation=payload["operation"],
+            owner_pid=payload["owner_pid"],
+            acquired_at=datetime.fromisoformat(payload["acquired_at"]),
+        )
+
+    @classmethod
+    def recover_abandoned(
+        cls,
+        root: ProjectRoot,
+        *,
+        minimum_age_seconds: int = 3600,
+        clock: Callable[[], datetime] | None = None,
+        process_alive: Callable[[int], bool] | None = None,
+    ) -> ProjectLockInfo:
+        """Remove a sufficiently old lock only when its owner is confirmed dead."""
+        if type(minimum_age_seconds) is not int or minimum_age_seconds < 1:
+            raise ValueError("minimum_age_seconds must be a positive integer")
+        path = root.path / ".contextforge" / "locks" / "project.lock"
+        if not path.is_file():
+            raise ProjectLockUnavailableError("No project lock exists")
+        payload, serialized = cls._read_lock(path)
+        acquired_at = datetime.fromisoformat(payload["acquired_at"])
+        now = (clock or (lambda: datetime.now(UTC)))()
+        if acquired_at.tzinfo is None or now.tzinfo is None:
+            raise ProjectLockOwnershipError("lock timestamps must be timezone-aware")
+        age = (now - acquired_at).total_seconds()
+        if age < minimum_age_seconds:
+            raise ProjectLockUnavailableError("Project lock is not old enough for recovery")
+        owner_pid = payload["owner_pid"]
+        alive = (process_alive or cls._process_alive)(owner_pid)
+        if alive:
+            raise ProjectLockUnavailableError("Project lock owner is still active")
+        try:
+            if path.read_text(encoding="utf-8") != serialized:
+                raise ProjectLockOwnershipError("project lock changed during recovery")
+            path.unlink()
+        except OSError as error:
+            raise ProjectLockOwnershipError("project lock could not be recovered") from error
+        return ProjectLockInfo(payload["operation"], owner_pid, acquired_at)
+
+    @staticmethod
+    def _read_lock(path: Path) -> tuple[_LockPayload, str]:
+        try:
+            serialized = path.read_text(encoding="utf-8")
+            payload = json.loads(serialized)
+        except (OSError, json.JSONDecodeError) as error:
+            raise ProjectLockOwnershipError("project lock metadata is invalid") from error
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("operation"), str)
+            or type(payload.get("owner_pid")) is not int
+            or not isinstance(payload.get("acquired_at"), str)
+            or not isinstance(payload.get("owner_token"), str)
+        ):
+            raise ProjectLockOwnershipError("project lock metadata is invalid")
+        try:
+            datetime.fromisoformat(payload["acquired_at"])
+        except ValueError as error:
+            raise ProjectLockOwnershipError("project lock timestamp is invalid") from error
+        return cast("_LockPayload", payload), serialized
+
+    @staticmethod
+    def _process_alive(process_id: int) -> bool:
+        if sys.platform == "win32":
+            return LocalProjectLock._windows_process_alive(process_id)
+        try:
+            os.kill(process_id, 0)
+        except ProcessLookupError:
+            return False
+        except (PermissionError, OSError):
+            return True
+        return True
+
+    @staticmethod
+    def _windows_process_alive(process_id: int) -> bool:
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            process_id,
+        )
+        if not handle:
+            return bool(ctypes.windll.kernel32.GetLastError() != 87)
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
