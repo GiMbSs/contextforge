@@ -13,6 +13,7 @@ authors = [
   { name = "Gilberto Neto", email = "gn.dev3@gmail.com" },
 ]
 dependencies = [
+  "mcp>=2.0,<3.0",
   "typer>=0.12,<1.0",
 ]
 classifiers = [

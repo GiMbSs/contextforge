@@ -12,6 +12,7 @@ from contextforge.adapters.evaluation import (
     FilesystemEvaluationReportWriter,
     FilesystemEvaluationSuiteLoader,
 )
+from contextforge.adapters.mcp import serve_mcp
 from contextforge.adapters.project_commands import (
     CliExitCode,
     LocalProjectCommandGateway,
@@ -48,6 +49,8 @@ execution_app = typer.Typer(help="Inspect, resume, and cancel persisted executio
 app.add_typer(execution_app, name="execution")
 lock_app = typer.Typer(help="Inspect and explicitly recover project locks.")
 app.add_typer(lock_app, name="lock")
+mcp_app = typer.Typer(help="Expose read-only ContextForge tools to coding agents.")
+app.add_typer(mcp_app, name="mcp")
 
 
 def _version_callback(value: bool) -> None:
@@ -163,6 +166,12 @@ def initialize(
 def status(ctx: typer.Context) -> None:
     """Display foundational ContextForge project state."""
     _execute_project_command(ctx, "status")
+
+
+@mcp_app.command("serve")
+def mcp_serve() -> None:
+    """Serve the ContextForge bridge over MCP stdio."""
+    serve_mcp()
 
 
 def _execution_command(
