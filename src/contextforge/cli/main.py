@@ -12,7 +12,7 @@ from contextforge.adapters.evaluation import (
     FilesystemEvaluationReportWriter,
     FilesystemEvaluationSuiteLoader,
 )
-from contextforge.adapters.mcp import serve_mcp
+from contextforge.adapters.mcp import register_codex_server, render_shell_command, serve_mcp
 from contextforge.adapters.project_commands import (
     CliExitCode,
     LocalProjectCommandGateway,
@@ -172,6 +172,31 @@ def status(ctx: typer.Context) -> None:
 def mcp_serve() -> None:
     """Serve the ContextForge bridge over MCP stdio."""
     serve_mcp()
+
+
+@mcp_app.command("install-codex")
+def mcp_install_codex(
+    ctx: typer.Context,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print the registration without modifying Codex."),
+    ] = False,
+) -> None:
+    """Register the local ContextForge MCP server in Codex CLI."""
+    options = ctx.ensure_object(GlobalOptions)
+    try:
+        result = register_codex_server(dry_run=dry_run)
+    except RuntimeError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(int(CliExitCode.GENERAL_FAILURE)) from error
+    if options.output_format == "json":
+        import json
+
+        typer.echo(json.dumps(result.to_dict(), sort_keys=True))
+        return
+    typer.echo(f"Status: {result.status}")
+    typer.echo(result.message)
+    typer.echo(f"Command: {render_shell_command(result.registration_command)}")
 
 
 def _execution_command(
