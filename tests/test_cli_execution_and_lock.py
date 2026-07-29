@@ -41,6 +41,51 @@ def _payload(result: object) -> dict[str, object]:
     return envelope["data"]
 
 
+def _awaiting_patch_execution(
+    tmp_path: Path,
+) -> tuple[FilesystemExecutionControlStorage, Execution, str]:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Prepare a recoverable patch",
+        TaskKind.MODIFY,
+        RequestedOutput.PATCH_PROPOSAL,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.PATCH,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    base = ["--project", str(tmp_path), "--format", "json", "execution"]
+    assert (
+        runner.invoke(
+            app,
+            [*base, "resume", str(execution.execution_id)],
+        ).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(
+            app,
+            [*base, "invoke", str(execution.execution_id), "--confirm"],
+        ).exit_code
+        == 0
+    )
+    validated = runner.invoke(
+        app,
+        [*base, "validate", str(execution.execution_id)],
+    )
+    assert validated.exit_code == 0, validated.stdout
+    proposal_id = _payload(validated)["proposal_id"]
+    assert isinstance(proposal_id, str)
+    return storage, execution, proposal_id
+
+
 def test_execution_show_and_cancel_reopen_persisted_state(tmp_path: Path) -> None:
     root = _root(tmp_path)
     execution = Execution(new_execution_id(), _project_id(root), new_task_id())
@@ -483,6 +528,25 @@ def test_execution_validate_materializes_patch_proposal(
     )
 
     assert approved.exit_code == 0, approved.stdout
+    approval_id = _payload(approved)["approval_id"]
+    repeated_approval = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "--format",
+            "json",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+    assert repeated_approval.exit_code == 0, repeated_approval.stdout
+    assert _payload(repeated_approval)["approval_id"] == approval_id
+    assert len(tuple((tmp_path / ".contextforge" / "approvals").glob("*.json"))) == 1
     after_approval = storage.load_execution(execution.execution_id)
     assert after_approval is not None
     assert after_approval.stage is ExecutionStage.APPLY
@@ -508,6 +572,20 @@ def test_execution_validate_materializes_patch_proposal(
     assert (tmp_path / "src" / "contextforge_generated.py").read_text(
         encoding="utf-8"
     ) == "value = 42\n"
+    repeated_application = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "apply",
+            proposal_id,
+        ],
+    )
+    assert repeated_application.exit_code == 0, repeated_application.stdout
+    assert _payload(repeated_application)["status"] == "applied"
 
 
 def test_execution_validate_rejects_patch_when_project_changed_after_invocation(
@@ -563,6 +641,156 @@ def test_execution_validate_rejects_patch_when_project_changed_after_invocation(
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None
     assert restored.status.value == "failed"
+
+
+def test_execution_resume_reconciles_approval_persisted_before_stage_advance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage, execution, proposal_id = _awaiting_patch_execution(tmp_path)
+    original_complete_stage = ExecutionController.complete_stage
+
+    def interrupt_stage_advance(
+        controller: ExecutionController,
+        next_stage: ExecutionStage,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        if next_stage is ExecutionStage.APPLY:
+            raise RuntimeError("simulated interruption after approval")
+        return original_complete_stage(controller, next_stage, *args, **kwargs)
+
+    monkeypatch.setattr(ExecutionController, "complete_stage", interrupt_stage_advance)
+    approved = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+    assert approved.exit_code == 1
+    monkeypatch.setattr(ExecutionController, "complete_stage", original_complete_stage)
+
+    resumed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert resumed.exit_code == 0, resumed.stdout
+    assert _payload(resumed)["status"] == "ready_to_apply"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.APPLY
+
+
+def test_execution_resume_reconciles_application_persisted_before_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage, execution, proposal_id = _awaiting_patch_execution(tmp_path)
+    approved = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+    assert approved.exit_code == 0
+    original_complete_stage = ExecutionController.complete_stage
+
+    def interrupt_completion(
+        controller: ExecutionController,
+        next_stage: ExecutionStage,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        if next_stage is ExecutionStage.COMPLETE:
+            raise RuntimeError("simulated interruption after application")
+        return original_complete_stage(controller, next_stage, *args, **kwargs)
+
+    monkeypatch.setattr(ExecutionController, "complete_stage", interrupt_completion)
+    applied = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "patch",
+            "apply",
+            proposal_id,
+        ],
+    )
+    assert applied.exit_code == 1
+    monkeypatch.setattr(ExecutionController, "complete_stage", original_complete_stage)
+
+    resumed = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert resumed.exit_code == 0, resumed.stdout
+    assert _payload(resumed)["status"] == "completed_after_application"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.COMPLETE
+    assert (tmp_path / "src" / "contextforge_generated.py").read_text(
+        encoding="utf-8"
+    ) == "value = 42\n"
+
+
+def test_repeated_patch_rejection_reuses_fact_and_keeps_execution_cancelled(
+    tmp_path: Path,
+) -> None:
+    storage, execution, proposal_id = _awaiting_patch_execution(tmp_path)
+    command = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "patch",
+        "reject",
+        proposal_id,
+        "--reason",
+        "Use a smaller change.",
+    ]
+
+    first = runner.invoke(app, command, input="y\n")
+    repeated = runner.invoke(app, command, input="y\n")
+
+    assert first.exit_code == 0
+    assert repeated.exit_code == 0
+    repeated_payload = json.loads(repeated.stdout.splitlines()[-1])["data"]
+    assert repeated_payload["reason"] == "Use a smaller change."
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.status.value == "cancelled"
 
 
 @pytest.mark.parametrize(

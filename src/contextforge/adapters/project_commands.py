@@ -882,6 +882,46 @@ class LocalProjectCommandGateway:
                 "The requested patch proposal is unavailable.",
             )
         execution_controller = _patch_execution_controller(root, proposal)
+        lifecycle = storage.load_lifecycle(selected_id)
+        if (
+            operation == "approve"
+            and lifecycle is not None
+            and lifecycle.state is ProposalLifecycleState.APPROVED
+        ):
+            approval = storage.load_active_approval(selected_id)
+            if approval is None:
+                return _patch_workflow_failure(
+                    PatchApprovalNotFoundError("Approved proposal has no active Approval Record")
+                )
+            _reconcile_execution_controller(root, execution_controller)
+            return _persisted_approval_result(
+                proposal_id,
+                approval,
+                execution_controller,
+            )
+        if (
+            operation == "reject"
+            and lifecycle is not None
+            and lifecycle.state is ProposalLifecycleState.REJECTED
+        ):
+            record = storage.load_record(proposal_id)
+            rejection = record.get("rejection") if record is not None else None
+            reason_value = rejection.get("reason") if isinstance(rejection, Mapping) else None
+            _reconcile_execution_controller(root, execution_controller)
+            return CliCommandResult(
+                {
+                    "command": "patch reject",
+                    "execution_id": (
+                        str(execution_controller.execution.execution_id)
+                        if execution_controller is not None
+                        else None
+                    ),
+                    "lifecycle_state": lifecycle.state.value,
+                    "proposal_id": proposal_id,
+                    "reason": reason_value,
+                    "status": "rejected",
+                }
+            )
         current_fingerprint = self._scan(root).project_fingerprint
         pipeline = PatchApprovalApplicationPipeline(
             storage=storage,
@@ -978,6 +1018,34 @@ class LocalProjectCommandGateway:
                 "The requested patch proposal is unavailable.",
             )
         execution_controller = _patch_execution_controller(root, proposal)
+        lifecycle = storage.load_lifecycle(selected_id)
+        if lifecycle is not None and lifecycle.state is ProposalLifecycleState.APPLIED:
+            persisted = storage.load_application_result(selected_id)
+            if persisted is None:
+                return _patch_application_failure(
+                    PatchWorkflowStateError("Applied proposal has no persisted application result")
+                )
+            _reconcile_execution_controller(root, execution_controller)
+            return CliCommandResult(
+                {
+                    "applied_change_ids": persisted.get("applied_change_ids", []),
+                    "command": "patch apply",
+                    "execution_id": (
+                        str(execution_controller.execution.execution_id)
+                        if execution_controller is not None
+                        else None
+                    ),
+                    "lifecycle_state": lifecycle.state.value,
+                    "proposal_id": proposal_id,
+                    "recovery_reference": persisted.get("recovery_reference"),
+                    "rollback_verified": persisted.get("rollback_verified"),
+                    "status": persisted.get("status", "applied"),
+                    "unapplied_change_ids": persisted.get(
+                        "unapplied_change_ids",
+                        [],
+                    ),
+                }
+            )
         approval = storage.load_active_approval(selected_id)
         if approval is None:
             failed = _patch_failure(
@@ -1468,6 +1536,9 @@ class LocalProjectCommandGateway:
         execution: Execution,
         storage: FilesystemExecutionControlStorage,
     ) -> CliCommandResult:
+        reconciliation = _reconcile_patch_execution(root, execution, storage)
+        if reconciliation is not None:
+            return reconciliation
         task = storage.load_task(execution.execution_id)
         assessment = assess_execution_recovery(
             execution,
@@ -2100,6 +2171,149 @@ def _patch_execution_controller(
     if execution is None or execution.status.is_terminal:
         return None
     return ExecutionController.resume(execution, storage)
+
+
+def _reconcile_execution_controller(
+    root: ProjectRoot,
+    controller: ExecutionController | None,
+) -> None:
+    if controller is None:
+        return
+    storage = FilesystemExecutionControlStorage(root)
+    execution = storage.load_execution(controller.execution.execution_id)
+    if execution is not None:
+        _reconcile_patch_execution(root, execution, storage)
+
+
+def _persisted_approval_result(
+    proposal_id: str,
+    approval: ApprovalRecord,
+    execution_controller: ExecutionController | None,
+) -> CliCommandResult:
+    return CliCommandResult(
+        {
+            "approval_id": str(approval.approval_id),
+            "command": "patch approve",
+            "execution_id": (
+                str(execution_controller.execution.execution_id)
+                if execution_controller is not None
+                else None
+            ),
+            "lifecycle_state": ProposalLifecycleState.APPROVED.value,
+            "method": approval.method.value,
+            "project_fingerprint": str(approval.project_fingerprint),
+            "proposal_fingerprint": str(approval.proposal_fingerprint),
+            "proposal_id": proposal_id,
+            "status": "approved",
+        }
+    )
+
+
+def _reconcile_patch_execution(
+    root: ProjectRoot,
+    execution: Execution,
+    storage: FilesystemExecutionControlStorage,
+) -> CliCommandResult | None:
+    if (
+        execution.workflow is not ExecutionWorkflow.PATCH
+        or execution.status.is_terminal
+        or execution.stage not in {ExecutionStage.AWAIT_APPROVAL, ExecutionStage.APPLY}
+    ):
+        return None
+    result = storage.load_result(execution.execution_id)
+    if result is None or result.get("result_type") != "patch_proposal":
+        return None
+    payload = result.get("result")
+    if not isinstance(payload, Mapping):
+        return None
+    raw_proposal_id = payload.get("proposal_id")
+    if not isinstance(raw_proposal_id, str):
+        return None
+    try:
+        proposal_id = PatchProposalId(raw_proposal_id)
+    except ValueError:
+        return None
+    lifecycle = LocalPatchProposalStorage(root).load_lifecycle(proposal_id)
+    if lifecycle is None:
+        return None
+
+    controller = ExecutionController.resume(execution, storage)
+    try:
+        if lifecycle.state is ProposalLifecycleState.APPROVED:
+            if controller.execution.stage is ExecutionStage.AWAIT_APPROVAL:
+                controller.complete_stage(ExecutionStage.APPLY)
+            return _patch_reconciliation_result(
+                controller.execution,
+                "ready_to_apply",
+                proposal_id,
+            )
+        if lifecycle.state is ProposalLifecycleState.REJECTED:
+            controller.cancel()
+            return _patch_reconciliation_result(
+                controller.execution,
+                "cancelled_after_rejection",
+                proposal_id,
+            )
+        if lifecycle.state is ProposalLifecycleState.APPLIED:
+            if controller.execution.stage is ExecutionStage.AWAIT_APPROVAL:
+                controller.complete_stage(ExecutionStage.APPLY)
+            controller.complete_stage(ExecutionStage.COMPLETE)
+            return _patch_reconciliation_result(
+                controller.execution,
+                "completed_after_application",
+                proposal_id,
+            )
+        if lifecycle.state in {
+            ProposalLifecycleState.STALE,
+            ProposalLifecycleState.APPLICATION_FAILED,
+        }:
+            controller.fail(
+                DiagnosticCollection(
+                    (
+                        Diagnostic(
+                            DiagnosticCode("EXECUTION_PATCH_RECONCILIATION_FAILED"),
+                            DiagnosticSeverity.ERROR,
+                            "The persisted patch lifecycle cannot continue.",
+                            "execution",
+                            technical_details=(f"Proposal lifecycle is {lifecycle.state.value}."),
+                        ),
+                    )
+                )
+            )
+            return _patch_reconciliation_result(
+                controller.execution,
+                "failed_from_patch_lifecycle",
+                proposal_id,
+                exit_code=CliExitCode.PATCH_APPLICATION_FAILURE,
+            )
+    except Exception as error:
+        return CliCommandResult(
+            {"command": "execution resume", "status": "reconciliation_failed"},
+            CliExitCode.PROJECT_STATE_CONFLICT,
+            _diagnostics(_execution_failure_diagnostics(error)),
+        )
+    return None
+
+
+def _patch_reconciliation_result(
+    execution: Execution,
+    status: str,
+    proposal_id: PatchProposalId,
+    *,
+    exit_code: CliExitCode = CliExitCode.SUCCESS,
+) -> CliCommandResult:
+    return CliCommandResult(
+        {
+            "command": "execution resume",
+            "execution": _execution_payload(
+                execution,
+                task_available=True,
+            ),
+            "proposal_id": str(proposal_id),
+            "status": status,
+        },
+        exit_code,
+    )
 
 
 def _context_payload(bundle: ContextBundle) -> dict[str, object]:

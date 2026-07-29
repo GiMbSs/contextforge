@@ -236,6 +236,14 @@ class LocalPatchProposalStorage:
         )
         temporary.replace(destination)
 
+    def load_application_result(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> dict[str, object] | None:
+        """Load the persisted application outcome for one exact proposal."""
+        source = self.root.path / ".contextforge" / "applications" / f"{proposal_id}.json"
+        return _read_json_object(source)
+
     def _write_record(
         self,
         proposal_id: PatchProposalId,

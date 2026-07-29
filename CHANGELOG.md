@@ -23,6 +23,8 @@ development are recorded in the Unreleased section.
   durable proposal materialization, and explicit approval handoff.
 - Bound patch approval and application continuation to the exact persisted
   proposal result instead of relying on reusable task identity.
+- Added idempotent patch authorization and application replay handling, plus
+  execution reconciliation after interrupted approval or application commits.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

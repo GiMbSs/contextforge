@@ -218,6 +218,13 @@ successful application completes the same execution. The binding uses the
 persisted proposal identifier, so rerunning a task cannot redirect approval or
 application to another execution.
 
+If a process stops after approval, rejection, or application was persisted but
+before the execution snapshot advanced, run `execution resume`. ContextForge
+reconciles the execution from the proposal lifecycle without invoking the
+provider or applying files again. Repeating `patch approve`, `patch reject`, or
+`patch apply` returns the already persisted outcome instead of duplicating the
+operation.
+
 Inspect the project lock:
 
 ```bash
