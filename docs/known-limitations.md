@@ -5,7 +5,8 @@ This page documents known limitations of ContextForge 0.1.0.
 ## Provider support
 
 - The default provider is a local mock provider that returns deterministic,
-  synthetic results. It is suitable for testing and offline workflows only.
+  synthetic insufficient-context results. It is suitable for pipeline testing
+  and offline workflows, not for substantive code analysis.
 - Ollama is supported via the `contextforge[providers]` extra and can run in
   local or remote mode. Live integration against a running Ollama server is not
   validated in CI.
@@ -40,6 +41,15 @@ This page documents known limitations of ContextForge 0.1.0.
 - Performance baselines are calibrated for small-to-medium projects on modern
   hardware. Very large repositories may exceed default baselines and should use
   incremental scanning or subset selection.
+
+## Evaluation scope
+
+- The reviewed offline benchmark contains 12 small Python cases. It covers
+  explicit paths and symbols, dependency chains, configuration, ambiguity,
+  test-to-production navigation, budget pressure, and insufficient evidence.
+- The benchmark does not yet measure live-provider answer quality or large,
+  multilingual repositories. Its analysis metrics evaluate evidence selection,
+  not the semantic quality of a remote model's prose.
 
 ## Platform notes
 

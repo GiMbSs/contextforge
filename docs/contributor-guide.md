@@ -55,7 +55,8 @@ python -m pip install -e ".[dev,providers]"
 Run the full quality gate:
 
 ```bash
-ruff format --check . && ruff check . && mypy src/contextforge && pytest && python -m build
+ruff format --check . && ruff check . && mypy src/contextforge && pytest
+python scripts/build-release.py
 ```
 
 ## Test strategy
@@ -144,6 +145,7 @@ contextforge evaluate tests/fixtures/evaluation/suites/core.json \
   --case direct-path \
   --fail-on-case-error \
   --minimum required-artifact-recall=1.0 \
+  --maximum context-irrelevant-ratio=0.0 \
   --output .contextforge/evaluations/latest
 ```
 
@@ -153,7 +155,7 @@ request, explain the new baseline, and obtain review rather than weakening a
 threshold solely to make CI pass.
 
 The reviewed aggregate values and thresholds are versioned in
-`tests/fixtures/evaluation/baselines/core-1.1.json`. Regenerate the suite twice,
+`tests/fixtures/evaluation/baselines/core-1.2.json`. Regenerate the suite twice,
 confirm matching configuration fingerprints and aggregate metrics, and review
 the resulting quality change before updating that file.
 

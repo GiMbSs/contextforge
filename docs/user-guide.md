@@ -368,27 +368,32 @@ case failures are recorded in both reports and do not abort later cases. Add
 `--fail-on-case-error` in automation to write the complete reports and then exit
 with code `19` if any selected case failed.
 
-Regression thresholds are opt-in:
+Inclusive minimum and maximum regression thresholds are opt-in:
 
 ```bash
 contextforge evaluate tests/fixtures/evaluation/suites/core.json \
   --case direct-path \
   --fail-on-case-error \
   --minimum required-artifact-recall=1.0 \
+  --maximum context-irrelevant-ratio=0.0 \
   --output .contextforge/evaluations/latest
 ```
 
 A failed threshold exits with code `20`; suite, configuration, output, or
-opted-in case failures exit with code `19`. Evaluation does not invoke a provider by default.
-Patch-oriented fixtures are copied to a temporary directory before execution.
+opted-in case failures exit with code `19`. Evaluation does not invoke a
+provider by default. Patch-oriented fixtures are copied to a temporary
+directory before execution.
 
-The reviewed `core` 1.1 baseline is enforced in CI after two identical
-deterministic runs. Its primary thresholds are:
+The reviewed `core` 1.2 baseline contains 12 cases, including test-to-production
+navigation, a deep dependency chain, homonymous symbols, and one intentionally
+unsolvable request. It is enforced in CI after two identical deterministic
+runs. Its reviewed bounds are:
 
 - `complete-evidence=0.875`
 - `context-precision=1.0`
 - `ndcg=0.8`
 - `required-artifact-recall=0.875`
+- `context-irrelevant-ratio<=0.0`
 
 The intentionally unsolvable case remains in this aggregate, so the global
 required-artifact recall is not expected to be `1.0`. The direct-path smoke
@@ -399,7 +404,8 @@ case retains its separate `1.0` recall requirement.
 Run the full local quality gate:
 
 ```bash
-ruff format --check . && ruff check . && mypy src/contextforge && pytest && python -m build
+ruff format --check . && ruff check . && mypy src/contextforge && pytest
+python scripts/build-release.py
 ```
 
 Common issues:

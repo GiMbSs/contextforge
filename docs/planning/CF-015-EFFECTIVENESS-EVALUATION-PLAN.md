@@ -2,9 +2,12 @@
 
 **Document ID:** CF-015  
 **Repository path:** `docs/planning/CF-015-EFFECTIVENESS-EVALUATION-PLAN.md`  
-**Status:** Planned  
-**Version:** 0.1.0  
-**Baseline:** ContextForge main after commit `936bbda`  
+**Status:** Completed
+
+**Version:** 1.0.0
+
+**Baseline:** ContextForge main after commit `56f9ac6`
+
 **Purpose:** Measure whether ContextForge selects useful context and improves
 software-engineering outcomes, beyond verifying that its implementation is
 technically correct.
@@ -377,17 +380,15 @@ CF-015 is complete when:
 7. CI detects a deliberate quality regression in a controlled test.
 8. No benchmark code weakens production security or approval boundaries.
 
-## 13. Recommended resumption point
+## 13. Completion record
 
-Resume with **CF-015-E001 — Immutable evaluation models**.
+CF-015-E001 through E008 are implemented. The reviewed `core` 1.2 suite contains
+12 deterministic cases and is compared with all-files, explicit-only, and
+lexical baselines. CI applies minimum quality thresholds and a maximum
+irrelevant-context ratio. JSON and Markdown reports remain offline and
+reproducible.
 
-Before implementation:
-
-1. Confirm the dataset serialization format (`JSON` is recommended initially).
-2. Inspect existing identifier, path, fingerprint, retrieval, and Context Bundle
-   models for reuse.
-3. Create three minimal cases only: direct path, dependency closure, and budget
-   pressure.
-4. Implement models and validation before building the runner.
-
-No production retrieval behavior should be changed during E001.
+The next evaluation expansion should be tracked in a new planning document and
+should focus on opt-in live-provider answer quality and larger multilingual
+fixtures without adding network or credential requirements to the default CI
+gate.

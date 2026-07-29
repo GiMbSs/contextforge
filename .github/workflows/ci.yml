@@ -70,6 +70,7 @@ jobs:
           --minimum context-precision=1.0
           --minimum ndcg=0.8
           --minimum required-artifact-recall=0.875
+          --maximum context-irrelevant-ratio=0.0
 
       - name: Verify package build
-        run: python -m build
+        run: python scripts/build-release.py

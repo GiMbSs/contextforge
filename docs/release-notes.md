@@ -85,7 +85,7 @@ ruff format --check .
 ruff check .
 mypy src/contextforge
 pytest
-python -m build
+python scripts/build-release.py
 ```
 
 ### Known limitations

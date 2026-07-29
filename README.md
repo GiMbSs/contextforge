@@ -5,9 +5,10 @@
 ContextForge is an open-source context engineering engine for building small,
 relevant, traceable context bundles for AI-assisted software development.
 
-The project is in its implementation-foundation stage. The current package provides
-the installable CLI skeleton and development quality controls; scanning, indexing,
-retrieval, providers, and patching are not implemented yet.
+The current MVP provides an installable CLI with project scanning, Python-aware
+indexing, evidence-ranked retrieval, bounded Context Bundles, provider
+integration, grounded analysis responses, and approval-gated patch application.
+Its deterministic evaluation suite measures retrieval effectiveness offline.
 
 ## Requirements
 
@@ -43,11 +44,25 @@ python -m pip install -e ".[dev,providers]"
 ## Local quality gate
 
 ```bash
-ruff format --check . && ruff check . && mypy src/contextforge && pytest && python -m build
+ruff format --check . && ruff check . && mypy src/contextforge && pytest
+python scripts/build-release.py
 ```
 
-This command checks formatting, linting, strict typing, tests with coverage, and
+These commands check formatting, linting, strict typing, tests with coverage, and
 package builds. The same checks run in continuous integration.
+
+Run the reviewed effectiveness gate:
+
+```bash
+contextforge evaluate tests/fixtures/evaluation/suites/core.json \
+  --fail-on-case-error \
+  --minimum complete-evidence=0.875 \
+  --minimum context-precision=1.0 \
+  --minimum ndcg=0.8 \
+  --minimum required-artifact-recall=0.875 \
+  --maximum context-irrelevant-ratio=0.0 \
+  --output .contextforge/evaluations/core
+```
 
 ## Project structure
 
