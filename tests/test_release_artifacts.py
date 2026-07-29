@@ -6,9 +6,33 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
+
+
+def _run_release_build(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a release build and retain actionable diagnostics on failure."""
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"release build exited with {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    return result
 
 
 @pytest.fixture
@@ -38,12 +62,7 @@ def dist_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     monkeypatch.chdir(work_dir)
-    result = subprocess.run(
-        [sys.executable, str(work_dir / "scripts" / "build-release.py")],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = _run_release_build([sys.executable, str(work_dir / "scripts" / "build-release.py")])
     assert "Built artifacts:" in result.stdout
     return work_dir / "dist"
 
@@ -85,6 +104,16 @@ def test_checksum_file_matches_artifacts(dist_dir: Path) -> None:
         assert checksums[artifact.name] == expected
 
 
+def test_offline_build_backend_is_installed_with_dev_dependencies() -> None:
+    """The development environment contains every offline build requirement."""
+    repo_root = Path(__file__).resolve().parent.parent
+    configuration = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    build_requirements = configuration["build-system"]["requires"]
+    dev_requirements = configuration["project"]["optional-dependencies"]["dev"]
+
+    assert set(build_requirements) <= set(dev_requirements)
+
+
 def test_release_build_is_reproducible_offline(tmp_path: Path) -> None:
     """Two network-independent builds produce identical package hashes."""
     repo_root = Path(__file__).resolve().parent.parent
@@ -113,26 +142,20 @@ def test_release_build_is_reproducible_offline(tmp_path: Path) -> None:
     command = [sys.executable, str(work_dir / "scripts" / "build-release.py")]
     environment = {"PATH": "", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "315532800"}
 
-    subprocess.run(
+    _run_release_build(
         command,
         cwd=work_dir,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=True,
+        environment=environment,
     )
     first = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (work_dir / "dist").iterdir()
         if path.suffix in {".whl", ".gz"}
     }
-    subprocess.run(
+    _run_release_build(
         command,
         cwd=work_dir,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=True,
+        environment=environment,
     )
     second = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
