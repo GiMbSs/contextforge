@@ -244,6 +244,28 @@ def execution_invoke(
         raise typer.Exit(int(result.exit_code))
 
 
+@execution_app.command("validate")
+def execution_validate(
+    ctx: typer.Context,
+    execution_id: Annotated[
+        str | None,
+        typer.Argument(help="Execution identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Validate a persisted response without invoking the provider."""
+    options = ctx.ensure_object(GlobalOptions)
+    root, failure = resolve_cli_project(options.project)
+    if failure is not None:
+        render_result(failure, output_format=options.output_format)
+        raise typer.Exit(int(failure.exit_code))
+    if root is None:
+        raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
+    result = _gateway.validate_execution(root, execution_id)
+    render_result(result, output_format=options.output_format)
+    if result.exit_code is not CliExitCode.SUCCESS:
+        raise typer.Exit(int(result.exit_code))
+
+
 @lock_app.command("show")
 def lock_show(ctx: typer.Context) -> None:
     """Show non-secret metadata for the current project lock."""

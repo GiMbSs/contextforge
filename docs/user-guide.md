@@ -176,6 +176,7 @@ contextforge execution show
 contextforge execution show execution_0123456789abcdef0123456789abcdef
 contextforge execution resume execution_0123456789abcdef0123456789abcdef
 contextforge execution invoke execution_0123456789abcdef0123456789abcdef --confirm
+contextforge execution validate execution_0123456789abcdef0123456789abcdef
 contextforge execution cancel execution_0123456789abcdef0123456789abcdef
 ```
 
@@ -202,6 +203,13 @@ the command will not retry it automatically. Provider response content is
 stored inside the execution directory for later validation, so
 `.contextforge/executions/` may contain sensitive project-derived data even
 though `execution show` exposes only response metadata.
+
+For analysis workflows, `execution validate` decodes only the already persisted
+response, verifies successful provider completion and checks every evidence
+reference against the Context Bundle used for that invocation. It writes an
+immutable `result.json` before completing the execution. Invalid or
+out-of-bundle responses fail the execution closed. Patch response validation is
+kept separate and is not accepted by the analysis validator.
 
 Inspect the project lock:
 

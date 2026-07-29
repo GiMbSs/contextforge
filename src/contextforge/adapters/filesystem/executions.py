@@ -39,6 +39,7 @@ _EXECUTION_SCHEMA = "contextforge.execution"
 _STAGE_SCHEMA = "contextforge.execution_stage"
 _TASK_SCHEMA = "contextforge.execution_task"
 _INVOCATION_SCHEMA = "contextforge.execution_invocation"
+_RESULT_SCHEMA = "contextforge.execution_result"
 
 
 class ExecutionStorageError(RuntimeError):
@@ -299,6 +300,7 @@ class FilesystemExecutionControlStorage:
         execution: Execution,
         request: InferenceRequest,
         provider_id: str,
+        context_references: tuple[str, ...],
     ) -> None:
         """Durably mark provider submission before the external call starts."""
         if execution.stage is not ExecutionStage.INVOKE_PROVIDER:
@@ -316,6 +318,7 @@ class FilesystemExecutionControlStorage:
             "execution-control-v1",
             {
                 "execution_id": str(execution.execution_id),
+                "context_references": list(context_references),
                 "provider_id": provider_id,
                 "request_id": str(request.request_id),
                 "response": None,
@@ -325,6 +328,50 @@ class FilesystemExecutionControlStorage:
             {"project_id": str(execution.project_id)},
         )
         self._write_atomic(destination, envelope.to_json() + "\n")
+
+    def save_result(
+        self,
+        execution: Execution,
+        result_type: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        """Persist one immutable validated workflow result."""
+        destination = self._result_path(execution.execution_id)
+        result_payload = {
+            "execution_id": str(execution.execution_id),
+            "result": dict(payload),
+            "result_type": result_type,
+            "task_id": str(execution.task_id),
+        }
+        if destination.exists():
+            existing = self._load_envelope(destination)
+            if (
+                existing.schema_name == _RESULT_SCHEMA
+                and existing.artifact_id == str(execution.execution_id)
+                and _object(existing.to_dict()["payload"], "result payload") == result_payload
+            ):
+                return
+            raise ExecutionStorageError("Execution result already exists")
+        envelope = SerializationEnvelope(
+            _RESULT_SCHEMA,
+            _SCHEMA_VERSION,
+            str(execution.execution_id),
+            self._clock(),
+            "execution-control-v1",
+            result_payload,
+            {"project_id": str(execution.project_id)},
+        )
+        self._write_atomic(destination, envelope.to_json() + "\n")
+
+    def load_result(self, execution_id: ExecutionId) -> dict[str, object] | None:
+        """Load a detached validated result record."""
+        destination = self._result_path(execution_id)
+        if not destination.is_file():
+            return None
+        envelope = self._load_envelope(destination)
+        if envelope.schema_name != _RESULT_SCHEMA or envelope.artifact_id != str(execution_id):
+            raise ExecutionStorageError("Record is not the requested execution result")
+        return _object(envelope.to_dict()["payload"], "result payload")
 
     def complete_invocation(
         self,
@@ -427,6 +474,9 @@ class FilesystemExecutionControlStorage:
 
     def _invocation_path(self, execution_id: ExecutionId) -> Path:
         return self._execution_directory(execution_id) / "invocation.json"
+
+    def _result_path(self, execution_id: ExecutionId) -> Path:
+        return self._execution_directory(execution_id) / "result.json"
 
     @staticmethod
     def _load_envelope(destination: Path) -> SerializationEnvelope:

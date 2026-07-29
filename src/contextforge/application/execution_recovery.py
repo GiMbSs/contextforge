@@ -82,6 +82,11 @@ def assess_execution_recovery(
             RecoveryDisposition.AWAITING_ACTION,
             "Provider invocation requires the explicit confirmed invoke command.",
         )
+    if execution.stage is ExecutionStage.VALIDATE_RESPONSE and invocation_status == "received":
+        return ExecutionRecoveryAssessment(
+            RecoveryDisposition.AWAITING_ACTION,
+            "The persisted provider response is ready for explicit validation.",
+        )
     return ExecutionRecoveryAssessment(
         RecoveryDisposition.MANUAL_REVIEW_REQUIRED,
         "The stage may have external side effects and must not be replayed automatically.",

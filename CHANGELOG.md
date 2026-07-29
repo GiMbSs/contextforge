@@ -17,6 +17,8 @@ development are recorded in the Unreleased section.
   invocation.
 - Added explicitly confirmed, single-attempt provider invocation with durable
   submitted and received states.
+- Added offline validation and durable completion of persisted analysis
+  responses.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

@@ -111,12 +111,14 @@ from contextforge.patch import (
 )
 from contextforge.project import ProjectRoot, resolve_project_root
 from contextforge.prompt import (
+    AnalysisResponse,
     DeliveryRequirements,
     InferenceRequest,
     PromptLimits,
     PromptMeasurer,
     PromptTemplateAssembler,
     analysis_response_contract,
+    decode_analysis_response,
     patch_response_contract,
 )
 from contextforge.provider import (
@@ -277,6 +279,12 @@ class ProjectCommandGateway(Protocol):
         *,
         confirmed: bool,
         explicit_config: Path | None = None,
+    ) -> CliCommandResult: ...
+
+    def validate_execution(
+        self,
+        root: ProjectRoot,
+        execution_id: str | None,
     ) -> CliCommandResult: ...
 
     def manage_lock(
@@ -1230,7 +1238,12 @@ class LocalProjectCommandGateway:
                     budget=ContextBudget(max_items=20, max_bytes=64_000),
                 ).prepare(ExecuteTask(execution.project_id, task, provider_id))
                 request = _build_inference_request(execution, task, prepared)
-                storage.begin_invocation(execution, request, provider_id)
+                storage.begin_invocation(
+                    execution,
+                    request,
+                    provider_id,
+                    tuple(item.context_item_id for item in prepared.context_bundle.items),
+                )
                 response = provider.invoke(
                     request,
                     ProviderExecutionContext(str(request.request_id)),
@@ -1265,6 +1278,64 @@ class LocalProjectCommandGateway:
                 ),
                 "invocation": _invocation_payload(storage.load_invocation(execution.execution_id)),
                 "status": "response_persisted",
+            }
+        )
+
+    def validate_execution(
+        self,
+        root: ProjectRoot,
+        execution_id: str | None,
+    ) -> CliCommandResult:
+        storage = FilesystemExecutionControlStorage(root)
+        if execution_id is None:
+            execution = storage.load_latest(_project_id(root))
+        else:
+            try:
+                selected_id = ExecutionId.from_string(execution_id)
+            except (TypeError, ValueError):
+                return _execution_not_found()
+            execution = storage.load_execution(selected_id)
+        if execution is None or execution.project_id != _project_id(root):
+            return _execution_not_found()
+        if execution.stage is not ExecutionStage.VALIDATE_RESPONSE or execution.status.is_terminal:
+            return CliCommandResult(
+                {"command": "execution validate", "status": "validation_rejected"},
+                CliExitCode.PROJECT_STATE_CONFLICT,
+            )
+        if execution.workflow is not ExecutionWorkflow.ANALYSIS:
+            return CliCommandResult(
+                {"command": "execution validate", "status": "workflow_not_supported"},
+                CliExitCode.UNSUPPORTED_CAPABILITY,
+            )
+        invocation = storage.load_invocation(execution.execution_id)
+        try:
+            analysis = _validate_persisted_analysis(invocation)
+            storage.save_result(
+                execution,
+                "analysis",
+                _analysis_result_payload(analysis),
+            )
+            controller = ExecutionController.resume(execution, storage)
+            controller.complete_stage(ExecutionStage.COMPLETE)
+        except Exception as error:
+            controller = ExecutionController.resume(execution, storage)
+            controller.fail(_execution_failure_diagnostics(error))
+            return CliCommandResult(
+                {"command": "execution validate", "status": "validation_failed"},
+                CliExitCode.PROMPT_FAILURE,
+                _diagnostics(_execution_failure_diagnostics(error)),
+            )
+        return CliCommandResult(
+            {
+                "command": "execution validate",
+                "execution": _execution_payload(
+                    controller.execution,
+                    task_available=True,
+                    invocation_status="received",
+                ),
+                "findings": len(analysis.findings),
+                "status": "completed",
+                "summary": analysis.summary,
             }
         )
 
@@ -1685,6 +1756,51 @@ def _invocation_status(record: dict[str, object] | None) -> str | None:
         return None
     status = record.get("status")
     return status if isinstance(status, str) else "invalid"
+
+
+def _validate_persisted_analysis(
+    invocation: dict[str, object] | None,
+) -> AnalysisResponse:
+    if invocation is None or invocation.get("status") != "received":
+        raise ValueError("A received provider response is required")
+    response = invocation.get("response")
+    references = invocation.get("context_references")
+    if not isinstance(response, dict) or not isinstance(references, list):
+        raise ValueError("The provider invocation record is incomplete")
+    if response.get("finish_state") not in {"completed", "completed_with_warnings"}:
+        raise ValueError("The provider response did not complete successfully")
+    content = response.get("content")
+    if not isinstance(content, str):
+        raise ValueError("The persisted provider response has no text content")
+    analysis = decode_analysis_response(content)
+    known_references = {item for item in references if isinstance(item, str)}
+    cited_references = {
+        reference for finding in analysis.findings for reference in finding.evidence_references
+    }
+    if not cited_references <= known_references:
+        raise ValueError("Analysis cites context outside the invoked Context Bundle")
+    return analysis
+
+
+def _analysis_result_payload(analysis: AnalysisResponse) -> dict[str, object]:
+    return {
+        "assumptions": list(analysis.assumptions),
+        "diagnostics": list(analysis.diagnostics),
+        "findings": [
+            {
+                "confidence": finding.confidence,
+                "evidence_references": list(finding.evidence_references),
+                "finding_id": finding.finding_id,
+                "statement": finding.statement,
+            }
+            for finding in analysis.findings
+        ],
+        "limitations": list(analysis.limitations),
+        "recommended_next_action": analysis.recommended_next_action,
+        "status": analysis.status.value,
+        "summary": analysis.summary,
+        "uncertainties": list(analysis.uncertainties),
+    }
 
 
 def _build_inference_request(

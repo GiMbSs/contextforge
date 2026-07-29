@@ -308,6 +308,27 @@ def test_execution_invoke_requires_confirmation_and_persists_response(
     )
     assert repeated.exit_code == 14
 
+    validated = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "validate",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert validated.exit_code == 0
+    validated_payload = _payload(validated)
+    assert validated_payload["status"] == "completed"
+    assert validated_payload["execution"]["status"] == "completed"  # type: ignore[index]
+    result_record = storage.load_result(execution.execution_id)
+    assert result_record is not None
+    assert result_record["result_type"] == "analysis"
+
 
 def test_execution_invoke_never_repeats_an_unknown_provider_outcome(
     tmp_path: Path,
@@ -383,6 +404,139 @@ def test_execution_invoke_never_repeats_an_unknown_provider_outcome(
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None
     assert restored.stage is ExecutionStage.INVOKE_PROVIDER
+
+
+def test_execution_validate_does_not_treat_patch_response_as_analysis(
+    tmp_path: Path,
+) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Prepare a patch",
+        TaskKind.MODIFY,
+        RequestedOutput.PATCH_PROPOSAL,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.PATCH,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    for command in ("resume", "invoke"):
+        arguments = [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            command,
+            str(execution.execution_id),
+        ]
+        if command == "invoke":
+            arguments.append("--confirm")
+        assert runner.invoke(app, arguments).exit_code == 0
+
+    validated = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "validate",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert validated.exit_code == 18
+    assert _payload(validated)["status"] == "workflow_not_supported"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.VALIDATE_RESPONSE
+
+
+def test_execution_validate_fails_closed_on_malformed_persisted_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Validate malformed output",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    assert (
+        runner.invoke(
+            app,
+            [
+                "--project",
+                str(tmp_path),
+                "--format",
+                "json",
+                "execution",
+                "resume",
+                str(execution.execution_id),
+            ],
+        ).exit_code
+        == 0
+    )
+    malformed_provider = DeterministicMockProvider(
+        MockProviderScenario.MALFORMED_RESPONSE,
+        datetime(2026, 7, 28, tzinfo=UTC),
+    )
+
+    class _Registry:
+        @staticmethod
+        def get(provider_id: str) -> DeterministicMockProvider | None:
+            return malformed_provider if provider_id == "mock-provider" else None
+
+    monkeypatch.setattr(
+        project_commands,
+        "_provider_registry",
+        lambda *_args, **_kwargs: _Registry(),
+    )
+    base = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "execution",
+    ]
+    assert (
+        runner.invoke(
+            app,
+            [*base, "invoke", str(execution.execution_id), "--confirm"],
+        ).exit_code
+        == 0
+    )
+
+    validated = runner.invoke(
+        app,
+        [*base, "validate", str(execution.execution_id)],
+    )
+
+    assert validated.exit_code == 8
+    assert _payload(validated)["status"] == "validation_failed"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.status.value == "failed"
+    assert storage.load_result(execution.execution_id) is None
 
 
 def test_lock_show_reports_only_non_secret_metadata(tmp_path: Path) -> None:

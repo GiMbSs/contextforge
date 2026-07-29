@@ -77,6 +77,17 @@ def test_unattempted_provider_stage_awaits_explicit_action() -> None:
     assert assessment.disposition is RecoveryDisposition.AWAITING_ACTION
 
 
+def test_received_response_awaits_explicit_validation() -> None:
+    execution = _running_at(ExecutionStage.VALIDATE_RESPONSE)
+
+    assessment = assess_execution_recovery(
+        execution,
+        invocation_status="received",
+    )
+
+    assert assessment.disposition is RecoveryDisposition.AWAITING_ACTION
+
+
 def test_patch_waiting_and_apply_require_explicit_action() -> None:
     awaiting = _running_at(ExecutionStage.AWAIT_APPROVAL)
     applying = _running_at(ExecutionStage.APPLY)

@@ -27,6 +27,7 @@ workflows for building precise, traceable LLM context from a software project.
   stop before any provider invocation.
 - Explicit provider invocation with confirmation, durable response capture, and
   fail-closed handling of unknown outcomes.
+- Offline analysis-response validation with evidence-bound result persistence.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).
