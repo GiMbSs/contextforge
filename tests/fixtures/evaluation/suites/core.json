@@ -1,0 +1,129 @@
+{
+  "cases": [
+    {
+      "case_id": "budget-pressure",
+      "context_budget": {
+        "max_artifacts": 2,
+        "max_estimated_tokens": 160
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "GREETING",
+        "format_greeting"
+      ],
+      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/service.py",
+          "relevance": "required",
+          "symbols": [
+            "format_greeting"
+          ]
+        },
+        {
+          "path": "src/settings.py",
+          "relevance": "required",
+          "symbols": [
+            "GREETING"
+          ]
+        },
+        {
+          "path": "docs/greetings.md",
+          "relevance": "irrelevant",
+          "symbols": []
+        },
+        {
+          "path": "src/greeting_archive.py",
+          "relevance": "irrelevant",
+          "symbols": [
+            "legacy_greeting"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "budget",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Explain how the runtime greeting text is constructed."
+    },
+    {
+      "case_id": "dependency-closure",
+      "context_budget": {
+        "max_artifacts": 3,
+        "max_estimated_tokens": 300
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "GREETING",
+        "format_greeting",
+        "greet"
+      ],
+      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/app.py",
+          "relevance": "required",
+          "symbols": [
+            "greet"
+          ]
+        },
+        {
+          "path": "src/service.py",
+          "relevance": "required",
+          "symbols": [
+            "format_greeting"
+          ]
+        },
+        {
+          "path": "src/settings.py",
+          "relevance": "supporting",
+          "symbols": [
+            "GREETING"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "dependency",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Trace the greet function through its direct dependency."
+    },
+    {
+      "case_id": "direct-path",
+      "context_budget": {
+        "max_artifacts": 1,
+        "max_estimated_tokens": 120
+      },
+      "expected_changed_paths": [],
+      "expected_evidence": [
+        "greet"
+      ],
+      "fixture_fingerprint": "project_sha256_3831cbd572b6b3b94aa6f6f5a592206cbaa4d32f476fdc804df0604c2534041e",
+      "fixture_project_id": "minimal-python",
+      "judgments": [
+        {
+          "path": "src/app.py",
+          "relevance": "required",
+          "symbols": [
+            "greet"
+          ]
+        }
+      ],
+      "requested_output": "analysis",
+      "tags": [
+        "direct",
+        "retrieval"
+      ],
+      "task_kind": "explain",
+      "task_text": "Explain src/app.py."
+    }
+  ],
+  "suite_id": "core",
+  "suite_version": "1.0"
+}
