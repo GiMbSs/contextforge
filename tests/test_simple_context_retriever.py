@@ -141,7 +141,39 @@ def test_retriever_expands_reviewed_semantic_aliases_deterministically() -> None
     )
 
     assert result.selected_items[0].content_reference == "src/service.py"
-    assert result.strategy_versions[0] == "simple-retriever-v4"
+    assert result.strategy_versions[0] == "simple-retriever-v5"
+
+
+def test_explicit_path_dominates_indirect_lexical_path_matches() -> None:
+    index = _make_index(
+        (
+            (
+                "unit_indirect",
+                "src/contextforge/adapters/mcp/server.py",
+                "from mcp.server import MCPServer",
+            ),
+            (
+                "unit_target",
+                "src/contextforge/adapters/mcp/codex.py",
+                "Codex registration implementation",
+            ),
+        )
+    )
+
+    result = SimpleContextRetriever().retrieve(
+        _request(
+            "Explain src/contextforge/adapters/mcp/codex.py",
+            index,
+            max_items=1,
+            max_bytes=10_000,
+        )
+    )
+
+    selected = result.selected_items[0]
+    assert selected.content_reference == "src/contextforge/adapters/mcp/codex.py"
+    assert selected.rationale.primary_reason is SelectionReason.EXACT_PATH_MATCH
+    assert dict(selected.score_breakdown)["explicit_path"] == 1.0
+    assert "explicit_path_match=true" in selected.rationale.evidence[0].detail
 
 
 def test_retriever_suppresses_historical_distractors_for_runtime_tasks() -> None:

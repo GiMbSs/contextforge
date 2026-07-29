@@ -40,7 +40,7 @@ from contextforge.retrieval.models import (
 )
 from contextforge.retrieval.query import TaskQueryNormalizer
 
-SIMPLE_RETRIEVER_VERSION = "simple-retriever-v4"
+SIMPLE_RETRIEVER_VERSION = "simple-retriever-v5"
 
 _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "composed": ("configuration", "settings"),
@@ -114,6 +114,7 @@ class _ScoredCandidate:
     historical_penalty: int = 0
     structural_hits: tuple[str, ...] = ()
     structural_boost: int = 0
+    explicit_path_match: bool = False
 
 
 class SimpleContextRetriever:
@@ -129,6 +130,9 @@ class SimpleContextRetriever:
             raise TypeError("request must be a RetrievalRequest")
 
         query = self._normalizer.normalize(request.task)
+        explicit_paths = frozenset(
+            _normalize(path.replace("\\", "/")) for path in query.explicit_paths
+        )
         composite_identifiers = tuple(
             token for token in query.normalized_text.split() if "_" in token or "." in token
         )
@@ -164,11 +168,20 @@ class SimpleContextRetriever:
 
         candidates: list[_ScoredCandidate] = []
         candidates.extend(
-            self._score_search_units(keywords, artifact_by_id, request.project_index.search_units)
+            self._score_search_units(
+                keywords,
+                explicit_paths,
+                artifact_by_id,
+                request.project_index.search_units,
+            )
         )
         candidates.extend(
             self._score_symbols(
-                keywords, artifact_by_id, units_by_artifact, request.project_index.symbols
+                keywords,
+                explicit_paths,
+                artifact_by_id,
+                units_by_artifact,
+                request.project_index.symbols,
             )
         )
         candidates = self._boost_structural_dependencies(candidates, request.project_index)
@@ -176,7 +189,14 @@ class SimpleContextRetriever:
         if not candidates:
             return self._empty_result(request)
 
-        candidates.sort(key=lambda item: (-item.score, item.estimated_bytes, item.candidate_id))
+        candidates.sort(
+            key=lambda item: (
+                not item.explicit_path_match,
+                -item.score,
+                item.estimated_bytes,
+                item.candidate_id,
+            )
+        )
 
         unique, duplicates = self._deduplicate_candidates(candidates)
         selected, excluded, exclusion_reasons = self._select_under_budget(unique, request.budget)
@@ -208,6 +228,7 @@ class SimpleContextRetriever:
     def _score_search_units(
         self,
         keywords: tuple[str, ...],
+        explicit_paths: frozenset[str],
         artifact_by_id: dict[ArtifactId, IndexedArtifact],
         units: tuple[SearchUnit, ...],
     ) -> list[_ScoredCandidate]:
@@ -229,6 +250,7 @@ class SimpleContextRetriever:
             if artifact is None:
                 continue
             path = str(artifact.path) if artifact.path is not None else ""
+            explicit_path_match = _normalize(path.replace("\\", "/")) in explicit_paths
             path_hits = _unique_hits(keywords, path)
             content_hits = _unique_hits(keywords, unit.text)
             raw_score = 3 * len(path_hits) + len(content_hits)
@@ -248,6 +270,7 @@ class SimpleContextRetriever:
                     content_hits=content_hits,
                     content_fingerprint=artifact.content_fingerprint,
                     historical_penalty=historical_penalty,
+                    explicit_path_match=explicit_path_match,
                 )
             )
         return scored
@@ -315,6 +338,7 @@ class SimpleContextRetriever:
     def _score_symbols(
         self,
         keywords: tuple[str, ...],
+        explicit_paths: frozenset[str],
         artifact_by_id: dict[ArtifactId, IndexedArtifact],
         units_by_artifact: dict[ArtifactId, list[SearchUnit]],
         symbols: tuple[Symbol, ...],
@@ -325,6 +349,7 @@ class SimpleContextRetriever:
             if artifact is None:
                 continue
             path = str(artifact.path) if artifact.path is not None else ""
+            explicit_path_match = _normalize(path.replace("\\", "/")) in explicit_paths
             path_hits = _unique_hits(keywords, path)
             name_hits = _unique_hits(keywords, symbol.name)
             content_hits = _unique_hits(keywords, symbol.signature or "")
@@ -361,6 +386,7 @@ class SimpleContextRetriever:
                     content_hits=content_hits,
                     content_fingerprint=artifact.content_fingerprint,
                     historical_penalty=historical_penalty,
+                    explicit_path_match=explicit_path_match,
                 )
             )
         return scored
@@ -415,7 +441,11 @@ class SimpleContextRetriever:
         selected_artifacts: set[ArtifactId] = set()
         selected_excerpts = 0
         for candidate in candidates:
-            if require_positive_score and candidate.score <= 0:
+            if (
+                require_positive_score
+                and candidate.score <= 0
+                and not candidate.explicit_path_match
+            ):
                 excluded.append(candidate)
                 exclusion_reasons[candidate.candidate_id] = (
                     SelectionReason.BELOW_RELEVANCE_THRESHOLD
@@ -546,7 +576,8 @@ class SimpleContextRetriever:
 
         sufficient_evidence = bool(selected) and (not is_fallback or broad_context_requested)
         if sufficient_evidence and specific_signals:
-            sufficient_evidence = any(
+            explicit_match = any(candidate.explicit_path_match for candidate in selected)
+            sufficient_evidence = explicit_match or any(
                 signal
                 in {
                     *candidate.path_hits,
@@ -660,7 +691,9 @@ class SimpleContextRetriever:
         rank: int,
     ) -> SelectionRationale:
         primary_reason = (
-            SelectionReason.LEXICAL_CONTENT_MATCH
+            SelectionReason.EXACT_PATH_MATCH
+            if candidate.explicit_path_match
+            else SelectionReason.LEXICAL_CONTENT_MATCH
             if candidate.score > 0
             else SelectionReason.REQUIRED_CONTEXT
         )
@@ -671,7 +704,11 @@ class SimpleContextRetriever:
             evidence=(self._simple_evidence(candidate),),
             score=float(candidate.score),
             rank=rank,
-            explanation="Selected by simple lexical relevance scoring.",
+            explanation=(
+                "Selected because the task explicitly references this artifact path."
+                if candidate.explicit_path_match
+                else "Selected by simple lexical relevance scoring."
+            ),
         )
 
     def _excluded_rationale(
@@ -708,7 +745,8 @@ class SimpleContextRetriever:
             f"content_hits={','.join(candidate.content_hits) or 'none'};"
             f"historical_penalty={candidate.historical_penalty};"
             f"structural_hits={','.join(candidate.structural_hits) or 'none'};"
-            f"structural_boost={candidate.structural_boost}"
+            f"structural_boost={candidate.structural_boost};"
+            f"explicit_path_match={str(candidate.explicit_path_match).lower()}"
         )
         return RetrievalEvidence(
             evidence_type="simple-lexical",
@@ -726,6 +764,7 @@ class SimpleContextRetriever:
             ("name", float(6 * len(candidate.name_hits))),
             ("content", float(len(candidate.content_hits))),
             ("structural", float(candidate.structural_boost)),
+            ("explicit_path", 1.0 if candidate.explicit_path_match else 0.0),
             ("historical_penalty", float(-candidate.historical_penalty)),
         )
 
