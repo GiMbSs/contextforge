@@ -1,0 +1,99 @@
+"""Tests for CF-015-E006 end-to-end evaluation orchestration."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from contextforge.adapters.evaluation import (
+    FilesystemEvaluationCaseExecutor,
+    FilesystemEvaluationSuiteLoader,
+)
+from contextforge.evaluation import (
+    CaseEvaluationOutput,
+    CaseRunStatus,
+    EvaluationCase,
+    EvaluationRunner,
+    StrategyResult,
+)
+
+FIXED_TIME = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "evaluation"
+
+
+@dataclass
+class _RecordingExecutor:
+    failed_case_id: str | None = None
+
+    def execute(self, case: EvaluationCase) -> CaseEvaluationOutput:
+        if case.case_id == self.failed_case_id:
+            raise RuntimeError("intentional failure")
+        return CaseEvaluationOutput(
+            (StrategyResult(case.case_id, "test-strategy", (), 0.0),),
+            (),
+        )
+
+
+def _suite():
+    return FilesystemEvaluationSuiteLoader(FIXTURE_ROOT).load(Path("suites/core.json"))
+
+
+def test_runner_filters_by_identifier_and_all_requested_tags() -> None:
+    result = EvaluationRunner(_RecordingExecutor(), clock=lambda: FIXED_TIME).run(
+        _suite(),
+        case_ids=("budget-pressure", "dependency-closure"),
+        tags=("dependency", "retrieval"),
+    )
+
+    assert result.metadata.selected_case_ids == ("dependency-closure",)
+    assert result.metadata.selected_tags == ("dependency", "retrieval")
+    assert result.metadata.offline is True
+    assert result.cases[0].status is CaseRunStatus.COMPLETED
+
+
+def test_runner_isolates_case_failures_and_records_reproducibility_metadata() -> None:
+    runner = EvaluationRunner(
+        _RecordingExecutor("budget-pressure"),
+        configuration=(("profile", "offline"),),
+        source_revision="abc123",
+        clock=lambda: FIXED_TIME,
+    )
+
+    first = runner.run(
+        _suite(),
+        case_ids=("budget-pressure", "dependency-closure"),
+    )
+    second = runner.run(
+        _suite(),
+        case_ids=("budget-pressure", "dependency-closure"),
+    )
+
+    assert [record.status for record in first.cases] == [
+        CaseRunStatus.FAILED,
+        CaseRunStatus.COMPLETED,
+    ]
+    assert tuple(item.case_id for item in first.run.strategy_results) == ("dependency-closure",)
+    assert first.metadata.source_revision == "abc123"
+    assert first.metadata.configuration_fingerprint.startswith("sha256:")
+    assert first.run.to_json() == second.run.to_json()
+
+
+def test_runner_rejects_unknown_case_filter() -> None:
+    with pytest.raises(ValueError, match="Unknown evaluation case"):
+        EvaluationRunner(_RecordingExecutor()).run(_suite(), case_ids=("missing",))
+
+
+def test_runner_captures_production_pipeline_validation_failure_offline() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+    result = EvaluationRunner(
+        FilesystemEvaluationCaseExecutor(loader),
+        clock=lambda: FIXED_TIME,
+    ).run(_suite(), case_ids=("direct-path",))
+
+    assert result.cases[0].status is CaseRunStatus.FAILED
+    assert result.cases[0].error_type == "ValueError"
+    assert "ContextBundle validation failed" in result.cases[0].error_message
+    assert result.metadata.offline is True

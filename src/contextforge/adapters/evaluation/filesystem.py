@@ -158,6 +158,17 @@ class FilesystemEvaluationSuiteLoader:
             raise EvaluationSuiteLoadError("evaluation_root: must be a directory")
         self._root = root
 
+    def fixture_root(self, fixture_project_id: str) -> Path:
+        """Resolve one verified fixture project below the evaluation root."""
+        if not isinstance(fixture_project_id, str) or not fixture_project_id.strip():
+            raise TypeError("fixture_project_id must be a non-empty string")
+        return _safe_relative(
+            self._root,
+            Path("projects", fixture_project_id),
+            "fixture_project_id",
+            must_be_file=False,
+        )
+
     def load(self, suite_path: Path) -> EvaluationSuite:
         """Load one suite and verify every referenced fixture fingerprint."""
         if not isinstance(suite_path, Path):
