@@ -32,7 +32,11 @@ from contextforge.retrieval.models import (
 )
 from contextforge.retrieval.query import TaskQueryNormalizer
 
-SIMPLE_RETRIEVER_VERSION = "simple-retriever-v1"
+SIMPLE_RETRIEVER_VERSION = "simple-retriever-v2"
+
+_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "salutation": ("greeting",),
+}
 
 
 def _normalize(value: str) -> str:
@@ -51,6 +55,17 @@ def _diagnostic(code: str, message: str) -> Diagnostic:
 def _unique_hits(keywords: tuple[str, ...], text: str) -> tuple[str, ...]:
     normalized = _normalize(text)
     return tuple(keyword for keyword in keywords if keyword in normalized)
+
+
+def _expand_keywords(keywords: tuple[str, ...]) -> tuple[str, ...]:
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        for candidate in (keyword, *_SEMANTIC_ALIASES.get(keyword, ())):
+            if candidate not in seen:
+                seen.add(candidate)
+                expanded.append(candidate)
+    return tuple(expanded)
 
 
 def _estimate_tokens(character_count: int) -> int:
@@ -88,10 +103,12 @@ class SimpleContextRetriever:
             raise TypeError("request must be a RetrievalRequest")
 
         query = self._normalizer.normalize(request.task)
-        keywords = tuple(
-            term.normalized
-            for term in query.terms
-            if term.kind.value == "keyword" and len(term.normalized) >= 3
+        keywords = _expand_keywords(
+            tuple(
+                term.normalized
+                for term in query.terms
+                if term.kind.value == "keyword" and len(term.normalized) >= 3
+            )
         )
 
         artifact_by_id = {

@@ -125,6 +125,22 @@ def test_retriever_selects_search_unit_matching_task_term() -> None:
     assert selected.rationale.score > 0
 
 
+def test_retriever_expands_reviewed_semantic_aliases_deterministically() -> None:
+    index = _make_index(
+        (
+            ("unit_service", "src/service.py", "runtime greeting formatter"),
+            ("unit_other", "src/other.py", "unrelated utility"),
+        )
+    )
+
+    result = SimpleContextRetriever().retrieve(
+        _request("explain the runtime salutation", index, max_artifacts=1)
+    )
+
+    assert result.selected_items[0].content_reference == "src/service.py"
+    assert result.strategy_versions[0] == "simple-retriever-v2"
+
+
 def test_retriever_falls_back_to_smallest_artifacts_when_no_match() -> None:
     index = _make_index(
         (
