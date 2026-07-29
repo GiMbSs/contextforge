@@ -329,21 +329,33 @@ def test_canonical_mvp_acceptance_scenario(root: Path) -> None:
     assert prompt_result.exit_code == 0
     transcript.append(_transcript_entry(6, "prompt measure", prompt_result.data))
 
-    # 7. Invoke local provider (health check).
-    health_result = gateway.inspect_provider("health", MOCK_PROVIDER_ID)
-    assert health_result.exit_code == 0
-    assert health_result.data.get("project_content_transmitted") is False
-    transcript.append(_transcript_entry(7, "provider health", health_result.data))
+    # 7. Invoke the local provider through the production patch pipeline.
+    proposal_result = gateway.propose(
+        root,
+        "Add a generated module.",
+        MOCK_PROVIDER_ID,
+    )
+    assert proposal_result.exit_code == 0
+    proposal_id = str(proposal_result.data["proposal_id"])
+    transcript.append(
+        _transcript_entry(
+            7,
+            "run Add a generated module.",
+            proposal_result.data,
+        )
+    )
 
-    # 8. Generate validated Patch Proposal.
-    proposal_id, proposal_fingerprint = _run_patch_pipeline(root)
+    # 8. Confirm that provider output became a validated Patch Proposal.
+    generated_record = LocalPatchProposalStorage(root).load_record(proposal_id)
+    assert generated_record is not None
+    assert generated_record["validation"]["state"] == "valid"
     transcript.append(
         _transcript_entry(
             8,
-            "patch proposal generation",
+            "patch proposal validation",
             {
                 "proposal_id": proposal_id,
-                "proposal_fingerprint": proposal_fingerprint,
+                "proposal_fingerprint": generated_record["lifecycle"]["proposal_fingerprint"],
             },
         )
     )
@@ -394,7 +406,7 @@ def test_canonical_mvp_acceptance_scenario(root: Path) -> None:
     transcript.append(_transcript_entry(13, "diagnostics", diagnostics_result.data))
 
     # Confirm the generated file exists.
-    generated = root.path / "src" / "generated.py"
+    generated = root.path / "src" / "contextforge_generated.py"
     assert generated.read_text(encoding="utf-8") == "value = 42\n"
 
     # Persist the acceptance transcript for the release package.

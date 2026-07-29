@@ -1,12 +1,23 @@
 """CLI tests for provider inspection commands."""
 
 import json
+from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from contextforge.cli.main import app
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolated_project_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep provider inspection independent from the developer's project config."""
+    monkeypatch.chdir(tmp_path)
 
 
 def _payload(result: object) -> dict[str, object]:

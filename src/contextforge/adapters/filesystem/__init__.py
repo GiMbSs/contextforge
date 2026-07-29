@@ -7,11 +7,19 @@ from contextforge.adapters.filesystem.patches import (
     PreflightEvidenceProvider,
 )
 from contextforge.adapters.filesystem.scanner import LocalProjectScanner
+from contextforge.adapters.filesystem.state import (
+    FilesystemIndexStorage,
+    FilesystemInventoryStorage,
+    ProjectStateStorageError,
+)
 
 __all__ = [
+    "FilesystemIndexStorage",
+    "FilesystemInventoryStorage",
     "LocalProjectInitialization",
     "LocalProjectScanner",
     "LocalProjectTraversal",
     "LocalStagedPatchApplication",
     "PreflightEvidenceProvider",
+    "ProjectStateStorageError",
 ]

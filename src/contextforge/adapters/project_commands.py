@@ -7,7 +7,6 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
 from typing import Protocol, cast
@@ -22,6 +21,8 @@ from contextforge.adapters.configuration import (
 )
 from contextforge.adapters.configuration.toml import TomlConfigurationSourceAdapter
 from contextforge.adapters.filesystem import (
+    FilesystemIndexStorage,
+    FilesystemInventoryStorage,
     LocalProjectInitialization,
     LocalProjectScanner,
     LocalStagedPatchApplication,
@@ -33,6 +34,7 @@ from contextforge.application import (
     ApplicationPreflightEvidence,
     ApplyPatchProposal,
     ApprovePatchProposal,
+    BuildProjectIndex,
     ExecuteTask,
     InitializeProject,
     PatchApplicationPreview,
@@ -41,10 +43,14 @@ from contextforge.application import (
     PatchApprovalApplicationPipeline,
     PatchApprovalBindingError,
     PatchApprovalNotFoundError,
+    PatchProposalExecutionPipeline,
     PatchProposalNotFoundError,
     PatchWorkflowStateError,
+    ProjectIndexBuild,
     ProjectInitialization,
+    ProjectScan,
     RejectPatchProposal,
+    ScanProject,
     StaleProjectStateError,
 )
 from contextforge.configuration import (
@@ -56,15 +62,11 @@ from contextforge.configuration import (
 from contextforge.context import (
     ContextBundle,
     ContextBundleSerializer,
-    ContextCoverage,
-    ContextStatistics,
 )
 from contextforge.context.simple_builder import SimpleContextBuilder
 from contextforge.diagnostics import DiagnosticCollection
 from contextforge.domain import (
     ArtifactPath,
-    IndexId,
-    InventoryId,
     PatchProposalId,
     ProjectFingerprint,
     ProjectId,
@@ -73,13 +75,10 @@ from contextforge.domain import (
     TaskKind,
     TaskSpecification,
     fingerprint_content,
-    new_context_bundle_id,
-    new_retrieval_id,
     new_task_id,
 )
 from contextforge.indexer import (
     DeterministicProjectIndexer,
-    IndexRequest,
     ProjectIndex,
 )
 from contextforge.patch import (
@@ -94,20 +93,15 @@ from contextforge.prompt import InferenceRequest
 from contextforge.provider import (
     MOCK_MODEL_ID,
     MOCK_PROVIDER_ID,
-    DeterministicMockProvider,
     MockProviderScenario,
     ProviderCapabilityProfile,
     ProviderPort,
 )
 from contextforge.retrieval import (
     ContextBudget,
-    RetrievalRequest,
-    RetrievalResult,
-    RetrievalStatistics,
-    RetrievalStatus,
 )
 from contextforge.retrieval.simple_retriever import SimpleContextRetriever
-from contextforge.scanner import DiscoveryStatus, ProjectArtifact, ProjectInventory, ScanRequest
+from contextforge.scanner import DiscoveryStatus, ProjectArtifact, ProjectInventory
 
 
 class CliExitCode(IntEnum):
@@ -155,6 +149,14 @@ class ProjectCommandGateway(Protocol):
     def index(self, root: ProjectRoot) -> CliCommandResult: ...
 
     def analyze(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        provider_id: str,
+        explicit_config: Path | None = None,
+    ) -> CliCommandResult: ...
+
+    def propose(
         self,
         root: ProjectRoot,
         task_text: str,
@@ -303,6 +305,7 @@ class LocalProjectCommandGateway:
                 "inventory_id": str(inventory.inventory_id),
                 "project_fingerprint": str(inventory.project_fingerprint),
                 "project_root": str(root.path),
+                "reused": statistics.artifacts_reused,
                 "status": inventory.status.value,
             },
             (
@@ -317,9 +320,11 @@ class LocalProjectCommandGateway:
 
     def index(self, root: ProjectRoot) -> CliCommandResult:
         inventory = self._scan(root)
-        project_index = DeterministicProjectIndexer(_LocalSource(root.path)).index(
-            IndexRequest(inventory)
-        )
+        project_index = ProjectIndexBuild(
+            DeterministicProjectIndexer(_LocalSource(root.path)),
+            FilesystemInventoryStorage(root),
+            FilesystemIndexStorage(root),
+        ).execute(BuildProjectIndex(_project_id(root), inventory.inventory_id))
         failed = project_index.status.value == "failed"
         return CliCommandResult(
             {
@@ -329,6 +334,7 @@ class LocalProjectCommandGateway:
                 "project_fingerprint": str(project_index.project_fingerprint),
                 "project_root": str(root.path),
                 "relationships": len(project_index.relationships),
+                "reused": project_index.measurements.artifacts_reused,
                 "search_units": len(project_index.search_units),
                 "status": project_index.status.value,
                 "symbols": len(project_index.symbols),
@@ -344,13 +350,10 @@ class LocalProjectCommandGateway:
         provider_id: str,
         explicit_config: Path | None = None,
     ) -> CliCommandResult:
-        inventory = self._scan(root)
-        project_index = DeterministicProjectIndexer(_LocalSource(root.path)).index(
-            IndexRequest(inventory)
-        )
+        self._prepare_project_state(root)
         pipeline = AnalysisExecutionPipeline(
-            inventory_storage=_SingleInventoryStorage(inventory),
-            index_storage=_SingleIndexStorage(project_index),
+            inventory_storage=FilesystemInventoryStorage(root),
+            index_storage=FilesystemIndexStorage(root),
             indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
             retriever=SimpleContextRetriever(),
             context_builder=SimpleContextBuilder(root.path),
@@ -375,7 +378,59 @@ class LocalProjectCommandGateway:
                 "request_id": str(result.inference_request.request_id),
                 "status": "completed",
                 "summary": result.analysis.summary,
-                "task": task_text,
+                "task_id": str(task.task_id),
+            },
+            diagnostics=_diagnostics(result.diagnostics),
+        )
+
+    def propose(
+        self,
+        root: ProjectRoot,
+        task_text: str,
+        provider_id: str,
+        explicit_config: Path | None = None,
+    ) -> CliCommandResult:
+        """Generate and persist a validated proposal without applying it."""
+        self._prepare_project_state(root)
+        source = _LocalSource(root.path)
+        result = PatchProposalExecutionPipeline(
+            inventory_storage=FilesystemInventoryStorage(root),
+            index_storage=FilesystemIndexStorage(root),
+            indexer=DeterministicProjectIndexer(source),
+            retriever=SimpleContextRetriever(),
+            context_builder=SimpleContextBuilder(root.path),
+            providers=_provider_registry(
+                root,
+                explicit_config,
+                mock_scenario=MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH,
+            ),
+            source_states=_LocalPatchSourceStates(root.path),
+            proposal_storage=LocalPatchProposalStorage(root),
+            budget=ContextBudget(max_items=20, max_bytes=64_000),
+        ).execute(
+            ExecuteTask(
+                _project_id(root),
+                TaskSpecification(
+                    new_task_id(),
+                    task_text,
+                    TaskKind.MODIFY,
+                    RequestedOutput.PATCH_PROPOSAL,
+                ),
+                provider_id,
+            )
+        )
+        self._persist_context(root, result.context.context_bundle)
+        self._persist_prompt(root, result.inference_request)
+        return CliCommandResult(
+            {
+                "change_count": len(result.proposal.changes),
+                "command": "run",
+                "lifecycle_state": result.lifecycle.state.value,
+                "mode": "patch_proposal",
+                "project_root": str(root.path),
+                "proposal_id": str(result.proposal.proposal_id),
+                "status": "awaiting_approval",
+                "summary": result.proposal.summary,
             },
             diagnostics=_diagnostics(result.diagnostics),
         )
@@ -908,99 +963,24 @@ class LocalProjectCommandGateway:
         temporary.replace(destination)
 
     def _scan(self, root: ProjectRoot) -> ProjectInventory:
-        return self.scanner.scan(ScanRequest(_project_id(root), root, self.scanner_configuration))
+        return ProjectScan(
+            self.scanner,
+            FilesystemInventoryStorage(root),
+            self.scanner_configuration,
+        ).execute(ScanProject(_project_id(root), root))
+
+    def _prepare_project_state(self, root: ProjectRoot) -> ProjectIndex:
+        inventory = self._scan(root)
+        return ProjectIndexBuild(
+            DeterministicProjectIndexer(_LocalSource(root.path)),
+            FilesystemInventoryStorage(root),
+            FilesystemIndexStorage(root),
+        ).execute(BuildProjectIndex(_project_id(root), inventory.inventory_id))
 
 
 def _project_id(root: ProjectRoot) -> ProjectId:
     identity = uuid5(NAMESPACE_URL, root.path.as_uri())
     return ProjectId(f"project_{identity.hex}")
-
-
-@dataclass(slots=True)
-class _SingleInventoryStorage:
-    inventory: ProjectInventory
-
-    def load(self, inventory_id: InventoryId) -> ProjectInventory | None:
-        return self.inventory if inventory_id == self.inventory.inventory_id else None
-
-    def load_latest(self, project_id: ProjectId) -> ProjectInventory | None:
-        return self.inventory if project_id == self.inventory.project_id else None
-
-    def save(self, inventory: ProjectInventory) -> None:
-        self.inventory = inventory
-
-
-@dataclass(slots=True)
-class _SingleIndexStorage:
-    project_index: ProjectIndex
-
-    def load(self, project_id: ProjectId) -> ProjectIndex | None:
-        return self.project_index if project_id == self.project_index.project_id else None
-
-    def save(self, project_index: ProjectIndex) -> None:
-        self.project_index = project_index
-
-    def remove(self, index_id: IndexId) -> None:
-        if index_id == self.project_index.index_id:
-            raise ValueError("active CLI index cannot be removed")
-
-
-class _EmptyRetriever:
-    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
-        return RetrievalResult(
-            new_retrieval_id(),
-            request.task.task_id,
-            request.project_index.index_id,
-            request.project_index.project_fingerprint,
-            ("cli-empty-retriever-v1",),
-            (),
-            (),
-            (),
-            request.budget,
-            DiagnosticCollection(),
-            RetrievalStatistics(),
-            RetrievalStatus.INCOMPLETE,
-            datetime.now(UTC),
-        )
-
-
-class _EmptyContextBuilder:
-    def build(
-        self,
-        retrieval_result: RetrievalResult,
-        *,
-        project_id: ProjectId,
-    ) -> ContextBundle:
-        return ContextBundle(
-            new_context_bundle_id(),
-            retrieval_result.task_id,
-            retrieval_result.retrieval_id,
-            project_id,
-            retrieval_result.project_fingerprint,
-            (),
-            (),
-            (),
-            ContextStatistics(),
-            ContextCoverage(),
-            DiagnosticCollection(),
-            "1",
-            "cli-empty-context-v1",
-            datetime.now(UTC),
-        )
-
-
-class _MockProviders:
-    @staticmethod
-    def provider_ids() -> tuple[str, ...]:
-        return (MOCK_PROVIDER_ID,)
-
-    def get(self, provider_id: str) -> DeterministicMockProvider | None:
-        if provider_id != MOCK_PROVIDER_ID:
-            return None
-        return DeterministicMockProvider(
-            MockProviderScenario.SUCCESSFUL_ANALYSIS,
-            datetime.now(UTC),
-        )
 
 
 def _load_project_config(
@@ -1022,9 +1002,42 @@ def _load_project_config(
 def _provider_registry(
     root: ProjectRoot,
     explicit: Path | None = None,
+    *,
+    mock_scenario: MockProviderScenario = MockProviderScenario.SUCCESSFUL_ANALYSIS,
 ) -> ConfiguredProviderRegistry:
     """Build the configured provider registry for a project."""
-    return ConfiguredProviderRegistry(_load_project_config(root, explicit).provider)
+    return ConfiguredProviderRegistry(
+        _load_project_config(root, explicit).provider,
+        mock_scenario,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalPatchSourceStates:
+    """Build trusted patch preconditions from the immutable scan snapshot."""
+
+    root: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.root, Path):
+            raise TypeError("root must be a Path")
+
+    def load(self, inventory: ProjectInventory) -> PatchSourceState:
+        return PatchSourceState(
+            tuple(
+                self._artifact_state(artifact)
+                for artifact in inventory.artifacts
+                if artifact.availability.value == "included"
+            )
+        )
+
+    def _artifact_state(self, artifact: ProjectArtifact) -> PatchSourceArtifact:
+        target = self.root.joinpath(*artifact.path.parts)
+        try:
+            content = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return PatchSourceArtifact(artifact.path)
+        return PatchSourceArtifact(artifact.path, fingerprint_content(content))
 
 
 def _provider_configuration(

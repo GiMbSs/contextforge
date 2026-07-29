@@ -178,9 +178,7 @@ def run(
         typer.Option("--analysis-only", help="Require the read-only analysis pipeline."),
     ] = False,
 ) -> None:
-    """Execute one explicitly sourced analysis-only task."""
-    if not analysis_only:
-        raise typer.BadParameter("--analysis-only is required in this increment")
+    """Execute one explicitly sourced analysis or patch-proposal task."""
     selected = sum((task is not None, stdin, task_file is not None))
     if selected != 1:
         raise typer.BadParameter("exactly one of TASK, --stdin, or --task-file is required")
@@ -204,12 +202,8 @@ def run(
         raise typer.Exit(int(failure.exit_code))
     if root is None:
         raise typer.Exit(int(CliExitCode.PROJECT_RESOLUTION_FAILURE))
-    result = _gateway.analyze(
-        root,
-        task_text,
-        options.provider or "mock-provider",
-        options.config,
-    )
+    operation = _gateway.analyze if analysis_only else _gateway.propose
+    result = operation(root, task_text, options.provider or "mock-provider", options.config)
     render_result(result, output_format=options.output_format)
 
 

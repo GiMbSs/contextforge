@@ -8,10 +8,13 @@ unredacted environment values through common logging or printing channels.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from contextforge.cli.main import app
 from contextforge.diagnostics import Diagnostic, DiagnosticCode, DiagnosticSeverity
 from contextforge.domain.tasks import RequestedOutput, TaskKind, TaskSpecification
 from contextforge.provider import (
@@ -155,3 +158,28 @@ def test_provider_raw_response_is_discarded_when_retention_is_never() -> None:
     )
 
     assert response.raw_response is None
+
+
+def test_run_output_does_not_echo_complete_task_or_credentials(tmp_path: Path) -> None:
+    """Default CLI output exposes task identity, never the complete task text."""
+    sensitive_task = _sensitive_task_text()
+    result = CliRunner(env={"NO_COLOR": "1"}).invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "run",
+            "--analysis-only",
+            sensitive_task,
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert sensitive_task not in result.stdout
+    assert "secret-db-pass-123" not in result.stdout
+    assert "sk-live-abcdef123456" not in result.stdout
+    assert sensitive_task not in result.stderr
+    payload = json.loads(result.stdout)["data"]
+    assert payload["task_id"].startswith("task_")

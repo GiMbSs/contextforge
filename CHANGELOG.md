@@ -7,6 +7,10 @@ development are recorded in the Unreleased section.
 
 ## [Unreleased]
 
+- Added filesystem-backed retrieval and context construction to CLI execution.
+- Added end-to-end patch-proposal generation through `contextforge run`.
+- Stopped echoing complete task text in default command output.
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

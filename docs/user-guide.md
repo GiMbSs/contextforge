@@ -147,8 +147,11 @@ Build the searchable index from the latest inventory:
 contextforge index
 ```
 
-Both commands persist their results under `.contextforge/executions/` and
-report diagnostics. Re-running them reuses unchanged artifacts automatically.
+Immutable, versioned inventory and index snapshots are persisted under
+`.contextforge/state/`; the current snapshot is selected by an atomic pointer.
+Both commands report diagnostics, and re-running them reuses unchanged
+artifacts automatically. Context and prompt records produced by `run` remain
+under `.contextforge/executions/`.
 
 ## Analysis task
 
@@ -170,8 +173,7 @@ The default provider is the deterministic offline mock. To use Ollama, set
 
 ## Patch proposal
 
-To request a patch proposal, omit `--analysis-only` once the patch pipeline is
-available in your build:
+To request a patch proposal, omit `--analysis-only`:
 
 ```bash
 contextforge run "Add validation to the ProjectPath constructor"

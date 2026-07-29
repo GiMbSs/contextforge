@@ -299,13 +299,27 @@ class DeterministicMockProvider:
                 ProviderFinishReason.NATURAL_COMPLETION,
             )
         if self.scenario is MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH:
+            changes = [
+                {
+                    "change_id": "mock-create-generated",
+                    "explanation": "Create the deterministic mock output.",
+                    "new_content": "value = 42\n",
+                    "operation": "create",
+                    "path": "src/contextforge_generated.py",
+                }
+            ]
             return (
                 json.dumps(
                     {
-                        "affected_files": ["src/example.py"],
+                        "affected_files": ["src/contextforge_generated.py"],
                         "assumptions": [],
-                        "patch_format": "unified_diff",
-                        "patch_payload": "--- a/src/example.py\n+++ b/src/example.py\n",
+                        "changes": changes,
+                        "patch_format": "structured_changes",
+                        "patch_payload": json.dumps(
+                            {"changes": changes},
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
                         "response_type": "patch_proposal",
                         "summary": "Deterministic mock patch.",
                         "warnings": [],

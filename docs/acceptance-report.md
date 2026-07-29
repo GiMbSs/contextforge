@@ -37,8 +37,8 @@ def greet(name: str) -> str:
 | 4 | Submit analysis task | Analysis-only task completed with mock provider |
 | 5 | Inspect retrieved context | Context bundle summary available |
 | 6 | Inspect prompt measurements | Prompt measurements available |
-| 7 | Invoke local provider | Health check passed; no project content transmitted |
-| 8 | Generate validated Patch Proposal | Structured patch proposal created for `src/generated.py` |
+| 7 | Invoke local provider | Patch task executed through the production provider pipeline |
+| 8 | Generate validated Patch Proposal | Structured patch proposal created for `src/contextforge_generated.py` |
 | 9 | Review proposal | One create operation identified |
 | 10 | Approve exact proposal | Proposal approved with non-interactive binding |
 | 11 | Apply proposal safely | File created; status `applied` |
@@ -47,7 +47,7 @@ def greet(name: str) -> str:
 
 ## Generated artifact
 
-The acceptance scenario created `src/generated.py`:
+The acceptance scenario created `src/contextforge_generated.py`:
 
 ```python
 value = 42
@@ -63,12 +63,10 @@ value = 42
 
 - The acceptance scenario uses the deterministic mock provider. Real remote
   providers require separate configuration and credentials.
-- Context retrieval and context bundle construction use minimal in-memory
-  implementations because full retrieval strategies are not part of the MVP
-  release candidate.
-- Patch proposal generation is driven through the application pipeline directly
-  in the acceptance test; the CLI `run` command currently only exposes
-  `--analysis-only` mode.
+- Retrieval and context construction use the deterministic filesystem-backed
+  implementations wired into the production command gateway.
+- The deterministic mock provider is used so acceptance remains reproducible
+  and does not require network access.
 
 ## Conclusion
 

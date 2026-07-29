@@ -5,15 +5,16 @@
 **Release date:** 2026-07-26
 
 ContextForge 0.1.0 is the first installable release of the context engineering
-engine. It provides a local-first, analysis-only workflow for building precise,
-traceable LLM context from a software project without transmitting source code
-to external services.
+engine. It provides local-first analysis and approval-gated patch-proposal
+workflows for building precise, traceable LLM context from a software project.
 
 ### What is included
 
 - `contextforge` CLI installed from PyPI-ready wheel and source distribution.
 - Project initialization and state inspection.
-- Scanner, indexer, and analysis-only task execution.
+- Scanner, indexer, analysis, and approval-gated patch-proposal execution.
+- Durable, versioned inventory and index snapshots with incremental reuse across
+  separate CLI executions.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

@@ -24,10 +24,13 @@ class ConfiguredProviderRegistry:
     """Resolve providers from a validated configuration snapshot."""
 
     config: ProviderConfig
+    mock_scenario: MockProviderScenario = MockProviderScenario.SUCCESSFUL_ANALYSIS
 
     def __post_init__(self) -> None:
         if not isinstance(self.config, ProviderConfig):
             raise TypeError("config must be a ProviderConfig")
+        if not isinstance(self.mock_scenario, MockProviderScenario):
+            raise TypeError("mock_scenario must be a MockProviderScenario")
 
     @property
     def provider_ids(self) -> tuple[str, ...]:
@@ -38,7 +41,7 @@ class ConfiguredProviderRegistry:
         """Return the configured provider, or None if unknown."""
         if provider_id == MOCK_PROVIDER_ID:
             return DeterministicMockProvider(
-                MockProviderScenario.SUCCESSFUL_ANALYSIS,
+                self.mock_scenario,
                 datetime.now(UTC),
             )
         if provider_id == self.config.provider_id and provider_id == "ollama":

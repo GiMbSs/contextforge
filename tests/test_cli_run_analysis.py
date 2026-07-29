@@ -41,7 +41,8 @@ def test_run_analysis_accepts_each_exact_task_source(tmp_path: Path, mode: str) 
     assert envelope["schema_version"] == "1.0"
     payload = envelope["data"]
     assert payload["mode"] == "analysis_only"
-    assert payload["task"] == task
+    assert payload["task_id"].startswith("task_")
+    assert task not in result.stdout
     assert payload["summary"] == "Deterministic mock analysis."
     assert result.stderr == ""
 
@@ -77,23 +78,40 @@ def test_run_requires_exactly_one_task_source(
     assert "exactly one" in result.stderr
 
 
-def test_run_rejects_empty_and_non_analysis_execution(tmp_path: Path) -> None:
+def test_run_rejects_empty_task_input(tmp_path: Path) -> None:
     empty = runner.invoke(
         app,
         ["--project", str(tmp_path), "run", "--analysis-only", "--stdin"],
         input=" \n",
         color=False,
     )
-    patch_mode = runner.invoke(
-        app,
-        ["--project", str(tmp_path), "run", "change a file"],
-        color=False,
-    )
-
     assert empty.exit_code == 2
     assert "must not be empty" in empty.stderr
-    assert patch_mode.exit_code == 2
-    assert "--analysis-only is required" in patch_mode.stderr
+
+
+def test_run_without_analysis_only_generates_reviewable_patch(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "example.py").write_text("value = 1\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "run",
+            "Add a generated module.",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)["data"]
+    assert payload["mode"] == "patch_proposal"
+    assert payload["status"] == "awaiting_approval"
+    assert payload["change_count"] == 1
+    proposal_id = payload["proposal_id"]
+    assert (tmp_path / ".contextforge" / "proposals" / f"{proposal_id}.json").is_file()
 
 
 def test_run_analysis_produces_non_empty_context(tmp_path: Path) -> None:

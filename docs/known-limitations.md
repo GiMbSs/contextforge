@@ -22,12 +22,12 @@ This page documents known limitations of ContextForge 0.1.0.
 - Directory creation and deletion operations require interactive confirmation
   unless `--non-interactive --approve <proposal_id>` is supplied.
 
-## Analysis scope
+## Execution scope
 
-- The `run` command only supports `--analysis-only`. It produces a read-only
-  report and does not modify the project.
-- No streaming responses are implemented; analysis results are returned
-  synchronously.
+- `run --analysis-only` produces a read-only report. Omitting the flag produces
+  a validated proposal and stops at explicit approval; it never applies the
+  proposal automatically.
+- No streaming responses are implemented; results are returned synchronously.
 
 ## Configuration
 

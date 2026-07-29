@@ -5,7 +5,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from contextforge.adapters.project_commands import (
+    LocalProjectCommandGateway,
+    _LocalPatchSourceStates,
+)
 from contextforge.cli.main import app
+from contextforge.domain import ArtifactPath, fingerprint_content
+from contextforge.project import ProjectRoot, ProjectRootSource
 
 runner = CliRunner()
 
@@ -66,3 +72,18 @@ def test_project_resolution_failure_has_stable_exit_and_stderr(tmp_path: Path) -
     assert result.exit_code == 4
     assert _payload(result) == {"status": "failed"}
     assert "CLI_PROJECT_NOT_FOUND" in result.stderr
+
+
+def test_patch_source_state_binds_text_artifacts_to_content_fingerprint(
+    tmp_path: Path,
+) -> None:
+    content = "value = 1\n"
+    (tmp_path / "module.py").write_text(content, encoding="utf-8")
+    root = ProjectRoot(tmp_path.resolve(), ProjectRootSource.EXPLICIT)
+    inventory = LocalProjectCommandGateway()._scan(root)
+
+    state = _LocalPatchSourceStates(root.path).load(inventory)
+
+    artifact = state.artifact_at(ArtifactPath("module.py"))
+    assert artifact is not None
+    assert artifact.content_fingerprint == fingerprint_content(content)
