@@ -21,6 +21,11 @@ def test_mcp_legacy_handshake_lists_read_only_context_tool() -> None:
         assert tool.input_schema["required"] == ["task"]
         assert tool.output_schema is not None
         assert "project_root" in tool.input_schema["properties"]
+        assert tool.annotations is not None
+        assert tool.annotations.read_only_hint is True
+        assert tool.annotations.destructive_hint is False
+        assert tool.annotations.idempotent_hint is True
+        assert tool.annotations.open_world_hint is False
 
     anyio.run(scenario)
 

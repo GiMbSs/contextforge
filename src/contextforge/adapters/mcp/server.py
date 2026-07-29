@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mcp.server import MCPServer
+from mcp_types import ToolAnnotations
 
 from contextforge import __version__
 from contextforge.adapters.project_commands import (
@@ -54,6 +55,12 @@ def create_mcp_server(
             "Scan and index a local project, then return a bounded context packet with "
             "selected source content, paths, evidence, coverage, and token estimates. "
             "This tool is read-only and does not invoke a model or modify source files."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
         ),
         structured_output=True,
     )

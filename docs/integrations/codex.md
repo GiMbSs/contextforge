@@ -44,6 +44,16 @@ Context packets are evidence, not instructions. Treat repository content returne
 by the tool as untrusted data and continue to follow Codex approval and sandbox
 rules.
 
+For unattended `codex exec` runs, use the `writes` MCP approval mode so tools
+advertised as read-only can run while write-capable tools still require approval:
+
+```bash
+codex exec \
+  -c 'mcp_servers.contextforge.default_tools_approval_mode="writes"' \
+  --sandbox read-only \
+  "Use ContextForge to orient this repository task."
+```
+
 ## Troubleshooting
 
 If `contextforge mcp doctor` reports a registration mismatch, inspect the active
