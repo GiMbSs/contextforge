@@ -19,6 +19,8 @@ development are recorded in the Unreleased section.
   submitted and received states.
 - Added offline validation and durable completion of persisted analysis
   responses.
+- Added offline patch-response validation with stale-project rejection,
+  durable proposal materialization, and explicit approval handoff.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

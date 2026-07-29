@@ -320,6 +320,7 @@ class FilesystemExecutionControlStorage:
                 "execution_id": str(execution.execution_id),
                 "context_references": list(context_references),
                 "provider_id": provider_id,
+                "project_fingerprint": str(request.project_fingerprint),
                 "request_id": str(request.request_id),
                 "response": None,
                 "status": "submitted",
@@ -399,9 +400,28 @@ class FilesystemExecutionControlStorage:
             "created_at": response.created_at.isoformat(),
             "finish_reason": response.finish_reason.value,
             "finish_state": response.finish_state.value,
-            "provider_id": response.metadata.provider_id,
+            "measurements": {
+                field_name: getattr(response.measurements, field_name)
+                for field_name in response.measurements.__dataclass_fields__
+            },
+            "metadata": {
+                field_name: (
+                    getattr(response.metadata, field_name).isoformat()
+                    if isinstance(getattr(response.metadata, field_name), datetime)
+                    else getattr(response.metadata, field_name)
+                )
+                for field_name in response.metadata.__dataclass_fields__
+            },
             "response_format": response.response_format.value,
             "response_id": str(response.response_id),
+            "usage": (
+                {
+                    field_name: getattr(response.usage, field_name)
+                    for field_name in response.usage.__dataclass_fields__
+                }
+                if response.usage is not None
+                else None
+            ),
         }
         envelope = SerializationEnvelope(
             _INVOCATION_SCHEMA,

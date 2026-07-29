@@ -406,7 +406,7 @@ def test_execution_invoke_never_repeats_an_unknown_provider_outcome(
     assert restored.stage is ExecutionStage.INVOKE_PROVIDER
 
 
-def test_execution_validate_does_not_treat_patch_response_as_analysis(
+def test_execution_validate_materializes_patch_proposal(
     tmp_path: Path,
 ) -> None:
     root = _root(tmp_path)
@@ -453,31 +453,107 @@ def test_execution_validate_does_not_treat_patch_response_as_analysis(
         ],
     )
 
-    assert validated.exit_code == 18
-    assert _payload(validated)["status"] == "workflow_not_supported"
+    assert validated.exit_code == 0, validated.stdout
+    payload = _payload(validated)
+    assert payload["status"] == "awaiting_approval"
+    assert isinstance(payload["proposal_id"], str)
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None
-    assert restored.stage is ExecutionStage.VALIDATE_RESPONSE
+    assert restored.stage is ExecutionStage.AWAIT_APPROVAL
+    result = storage.load_result(execution.execution_id)
+    assert result is not None
+    assert result["result_type"] == "patch_proposal"
 
 
-def test_execution_validate_fails_closed_on_malformed_persisted_response(
+def test_execution_validate_rejects_patch_when_project_changed_after_invocation(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _root(tmp_path)
     storage = FilesystemExecutionControlStorage(root)
     task = TaskSpecification(
         new_task_id(),
-        "Validate malformed output",
-        TaskKind.EXPLAIN,
-        RequestedOutput.ANALYSIS,
+        "Prepare a stale patch",
+        TaskKind.MODIFY,
+        RequestedOutput.PATCH_PROPOSAL,
         metadata=(("provider_id", "mock-provider"),),
     )
     execution = Execution(
         new_execution_id(),
         _project_id(root),
         task.task_id,
-        workflow=ExecutionWorkflow.ANALYSIS,
+        workflow=ExecutionWorkflow.PATCH,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    base = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "execution",
+    ]
+    assert (
+        runner.invoke(
+            app,
+            [*base, "resume", str(execution.execution_id)],
+        ).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(
+            app,
+            [*base, "invoke", str(execution.execution_id), "--confirm"],
+        ).exit_code
+        == 0
+    )
+    (tmp_path / "changed.py").write_text("value = 1\n", encoding="utf-8")
+
+    validated = runner.invoke(
+        app,
+        [*base, "validate", str(execution.execution_id)],
+    )
+
+    assert validated.exit_code == 10
+    assert _payload(validated)["status"] == "validation_failed"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.status.value == "failed"
+
+
+@pytest.mark.parametrize(
+    ("workflow", "task_kind", "requested_output", "expected_exit_code"),
+    [
+        (ExecutionWorkflow.ANALYSIS, TaskKind.EXPLAIN, RequestedOutput.ANALYSIS, 8),
+        (
+            ExecutionWorkflow.PATCH,
+            TaskKind.MODIFY,
+            RequestedOutput.PATCH_PROPOSAL,
+            10,
+        ),
+    ],
+)
+def test_execution_validate_fails_closed_on_malformed_persisted_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    workflow: ExecutionWorkflow,
+    task_kind: TaskKind,
+    requested_output: RequestedOutput,
+    expected_exit_code: int,
+) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Validate malformed output",
+        task_kind,
+        requested_output,
+        metadata=(("provider_id", "mock-provider"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=workflow,
     )
     ExecutionController(execution, storage)
     storage.save_task(execution.execution_id, task)
@@ -531,7 +607,7 @@ def test_execution_validate_fails_closed_on_malformed_persisted_response(
         [*base, "validate", str(execution.execution_id)],
     )
 
-    assert validated.exit_code == 8
+    assert validated.exit_code == expected_exit_code
     assert _payload(validated)["status"] == "validation_failed"
     restored = storage.load_execution(execution.execution_id)
     assert restored is not None

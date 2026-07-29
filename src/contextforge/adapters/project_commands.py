@@ -61,6 +61,7 @@ from contextforge.application import (
     RejectPatchProposal,
     ScanProject,
     StaleProjectStateError,
+    StructuredPatchEngine,
     assess_execution_recovery,
 )
 from contextforge.configuration import (
@@ -86,6 +87,8 @@ from contextforge.domain import (
     ExecutionId,
     ExecutionStage,
     ExecutionWorkflow,
+    InferenceRequestId,
+    InferenceResponseId,
     PatchProposalId,
     ProjectFingerprint,
     ProjectId,
@@ -106,8 +109,11 @@ from contextforge.patch import (
     ApprovalMethod,
     ApprovalRecord,
     PatchProposal,
+    PatchProposalLifecycle,
     PatchSourceArtifact,
     PatchSourceState,
+    ProposalLifecycleState,
+    fingerprint_patch_proposal,
 )
 from contextforge.project import ProjectRoot, resolve_project_root
 from contextforge.prompt import (
@@ -124,10 +130,18 @@ from contextforge.prompt import (
 from contextforge.provider import (
     MOCK_MODEL_ID,
     MOCK_PROVIDER_ID,
+    InferenceResponse,
     MockProviderScenario,
     ProviderCapabilityProfile,
+    ProviderDiagnostics,
     ProviderExecutionContext,
+    ProviderExecutionMeasurements,
+    ProviderFinishReason,
+    ProviderFinishState,
     ProviderPort,
+    ProviderResponseFormat,
+    ProviderResponseMetadata,
+    ProviderUsage,
 )
 from contextforge.retrieval import (
     ContextBudget,
@@ -1219,7 +1233,15 @@ class LocalProjectCommandGateway:
                 CliExitCode.APPROVAL_REQUIRED,
             )
         provider_id = _task_provider_id(task)
-        provider = _provider_registry(root, explicit_config).get(provider_id)
+        provider = _provider_registry(
+            root,
+            explicit_config,
+            mock_scenario=(
+                MockProviderScenario.SUCCESSFUL_STRUCTURED_PATCH
+                if execution.workflow is ExecutionWorkflow.PATCH
+                else MockProviderScenario.SUCCESSFUL_ANALYSIS
+            ),
+        ).get(provider_id)
         if provider is None:
             return CliCommandResult(
                 {"command": "execution invoke", "status": "provider_unavailable"},
@@ -1302,12 +1324,14 @@ class LocalProjectCommandGateway:
                 {"command": "execution validate", "status": "validation_rejected"},
                 CliExitCode.PROJECT_STATE_CONFLICT,
             )
-        if execution.workflow is not ExecutionWorkflow.ANALYSIS:
-            return CliCommandResult(
-                {"command": "execution validate", "status": "workflow_not_supported"},
-                CliExitCode.UNSUPPORTED_CAPABILITY,
-            )
         invocation = storage.load_invocation(execution.execution_id)
+        if execution.workflow is ExecutionWorkflow.PATCH:
+            return self._validate_patch_execution(
+                root,
+                execution,
+                storage,
+                invocation,
+            )
         try:
             analysis = _validate_persisted_analysis(invocation)
             storage.save_result(
@@ -1336,6 +1360,105 @@ class LocalProjectCommandGateway:
                 "findings": len(analysis.findings),
                 "status": "completed",
                 "summary": analysis.summary,
+            }
+        )
+
+    def _validate_patch_execution(
+        self,
+        root: ProjectRoot,
+        execution: Execution,
+        storage: FilesystemExecutionControlStorage,
+        invocation: dict[str, object] | None,
+    ) -> CliCommandResult:
+        task = storage.load_task(execution.execution_id)
+        try:
+            if task is None:
+                raise ValueError("The persisted task is unavailable")
+            response = _restore_persisted_response(execution, invocation)
+            expected_fingerprint = _invocation_project_fingerprint(invocation)
+            current_inventory = self._scan(root)
+            if current_inventory.project_fingerprint != expected_fingerprint:
+                raise StaleProjectStateError(
+                    "Project fingerprint changed after provider invocation"
+                )
+            prepared = ContextPreparationPipeline(
+                inventory_storage=FilesystemInventoryStorage(root),
+                index_storage=FilesystemIndexStorage(root),
+                indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
+                retriever=SimpleContextRetriever(),
+                context_builder=SimpleContextBuilder(root.path),
+                budget=ContextBudget(max_items=20, max_bytes=64_000),
+            ).prepare(
+                ExecuteTask(
+                    execution.project_id,
+                    task,
+                    _task_provider_id(task),
+                )
+            )
+            request = _build_inference_request(
+                execution,
+                task,
+                prepared,
+                request_id=response.request_id,
+            )
+            materialization = StructuredPatchEngine().build(
+                response=response,
+                request=request,
+                source_state=_LocalPatchSourceStates(root.path).load(prepared.inventory),
+                expected_project_fingerprint=expected_fingerprint,
+                created_at=datetime.now(UTC),
+            )
+            if materialization.proposal is None:
+                raise ValueError("Patch Engine rejected the persisted response")
+            proposal = materialization.proposal
+            proposal_fingerprint = fingerprint_patch_proposal(proposal)
+            lifecycle = PatchProposalLifecycle.proposed(
+                proposal.proposal_id,
+                proposal_fingerprint,
+                proposal.created_at,
+            )
+            lifecycle = lifecycle.transition(
+                ProposalLifecycleState.VALIDATED,
+                at=datetime.now(UTC),
+                proposal_fingerprint=proposal_fingerprint,
+            ).transition(
+                ProposalLifecycleState.AWAITING_APPROVAL,
+                at=datetime.now(UTC),
+                proposal_fingerprint=proposal_fingerprint,
+            )
+            LocalPatchProposalStorage(root).save(proposal, lifecycle)
+            storage.save_result(
+                execution,
+                "patch_proposal",
+                {
+                    "change_count": len(proposal.changes),
+                    "proposal_id": str(proposal.proposal_id),
+                    "summary": proposal.summary,
+                },
+            )
+            controller = ExecutionController.resume(execution, storage)
+            controller.complete_stage(ExecutionStage.BUILD_PROPOSAL)
+            controller.complete_stage(ExecutionStage.AWAIT_APPROVAL)
+        except Exception as error:
+            controller = ExecutionController.resume(execution, storage)
+            controller.fail(_execution_failure_diagnostics(error))
+            return CliCommandResult(
+                {"command": "execution validate", "status": "validation_failed"},
+                CliExitCode.PATCH_VALIDATION_FAILURE,
+                _diagnostics(_execution_failure_diagnostics(error)),
+            )
+        return CliCommandResult(
+            {
+                "change_count": len(proposal.changes),
+                "command": "execution validate",
+                "execution": _execution_payload(
+                    controller.execution,
+                    task_available=True,
+                    invocation_status="received",
+                ),
+                "proposal_id": str(proposal.proposal_id),
+                "status": "awaiting_approval",
+                "summary": proposal.summary,
             }
         )
 
@@ -1732,8 +1855,13 @@ def _invocation_payload(record: dict[str, object] | None) -> dict[str, object] |
     response = record.get("response")
     response_summary = None
     if isinstance(response, dict):
+        metadata = response.get("metadata")
         response_summary = {
-            key: response.get(key)
+            key: (
+                metadata.get("provider_id")
+                if key == "provider_id" and isinstance(metadata, dict)
+                else response.get(key)
+            )
             for key in (
                 "created_at",
                 "finish_reason",
@@ -1803,10 +1931,113 @@ def _analysis_result_payload(analysis: AnalysisResponse) -> dict[str, object]:
     }
 
 
+def _invocation_project_fingerprint(
+    invocation: dict[str, object] | None,
+) -> ProjectFingerprint:
+    if invocation is None or invocation.get("status") != "received":
+        raise ValueError("A received provider response is required")
+    value = invocation.get("project_fingerprint")
+    if not isinstance(value, str):
+        raise ValueError("Invocation project fingerprint is unavailable")
+    return ProjectFingerprint(value)
+
+
+def _restore_persisted_response(
+    execution: Execution,
+    invocation: dict[str, object] | None,
+) -> InferenceResponse:
+    if invocation is None or invocation.get("status") != "received":
+        raise ValueError("A received provider response is required")
+    response = invocation.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("The persisted provider response is unavailable")
+    metadata = response.get("metadata")
+    measurements = response.get("measurements")
+    usage = response.get("usage")
+    if not isinstance(metadata, dict) or not isinstance(measurements, dict):
+        raise ValueError("Provider response metadata is incomplete")
+    restored_usage = None
+    if usage is not None:
+        if not isinstance(usage, dict):
+            raise ValueError("Provider usage is invalid")
+        restored_usage = ProviderUsage(
+            input_tokens=_optional_record_int(usage, "input_tokens"),
+            output_tokens=_optional_record_int(usage, "output_tokens"),
+            total_tokens=_optional_record_int(usage, "total_tokens"),
+            input_bytes=_optional_record_int(usage, "input_bytes"),
+            output_bytes=_optional_record_int(usage, "output_bytes"),
+            values_are_estimates=_record_bool(usage, "values_are_estimates"),
+        )
+    return InferenceResponse(
+        InferenceResponseId.from_string(str(response["response_id"])),
+        InferenceRequestId.from_string(str(invocation["request_id"])),
+        execution.task_id,
+        str(response["content"]),
+        ProviderResponseFormat(str(response["response_format"])),
+        ProviderResponseMetadata(
+            provider_id=str(metadata["provider_id"]),
+            adapter_id=str(metadata["adapter_id"]),
+            adapter_version=str(metadata["adapter_version"]),
+            model_id=str(metadata["model_id"]),
+            capability_profile_id=str(metadata["capability_profile_id"]),
+            invoked_at=datetime.fromisoformat(str(metadata["invoked_at"])),
+            completed_at=datetime.fromisoformat(str(metadata["completed_at"])),
+            provider_request_id=(
+                str(metadata["provider_request_id"])
+                if metadata.get("provider_request_id") is not None
+                else None
+            ),
+            retry_attempt=_record_int(metadata, "retry_attempt"),
+        ),
+        restored_usage,
+        ProviderExecutionMeasurements(
+            total_duration_ms=_record_int(measurements, "total_duration_ms"),
+            connection_duration_ms=_optional_record_int(
+                measurements,
+                "connection_duration_ms",
+            ),
+            provider_duration_ms=_optional_record_int(
+                measurements,
+                "provider_duration_ms",
+            ),
+            retry_count=_record_int(measurements, "retry_count"),
+        ),
+        ProviderFinishState(str(response["finish_state"])),
+        ProviderDiagnostics(),
+        datetime.fromisoformat(str(response["created_at"])),
+        ProviderFinishReason(str(response["finish_reason"])),
+    )
+
+
+def _record_int(record: dict[str, object], key: str) -> int:
+    value = record.get(key)
+    if type(value) is not int:
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
+def _optional_record_int(record: dict[str, object], key: str) -> int | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise ValueError(f"{key} must be an integer or null")
+    return value
+
+
+def _record_bool(record: dict[str, object], key: str) -> bool:
+    value = record.get(key)
+    if type(value) is not bool:
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
 def _build_inference_request(
     execution: Execution,
     task: TaskSpecification,
     prepared: ContextPreparationResult,
+    *,
+    request_id: InferenceRequestId | None = None,
 ) -> InferenceRequest:
     bundle = prepared.context_bundle
     inventory = prepared.inventory
@@ -1828,7 +2059,7 @@ def _build_inference_request(
         else ("structured_output", "structured_patch")
     )
     return InferenceRequest(
-        new_inference_request_id(),
+        request_id or new_inference_request_id(),
         task.task_id,
         bundle.bundle_id,
         execution.project_id,

@@ -204,12 +204,14 @@ stored inside the execution directory for later validation, so
 `.contextforge/executions/` may contain sensitive project-derived data even
 though `execution show` exposes only response metadata.
 
-For analysis workflows, `execution validate` decodes only the already persisted
-response, verifies successful provider completion and checks every evidence
-reference against the Context Bundle used for that invocation. It writes an
-immutable `result.json` before completing the execution. Invalid or
-out-of-bundle responses fail the execution closed. Patch response validation is
-kept separate and is not accepted by the analysis validator.
+`execution validate` routes the already persisted response according to the
+execution workflow. Analysis responses are checked for successful provider
+completion and evidence references are bound to the Context Bundle used for the
+invocation before an immutable `result.json` completes the execution. Patch
+responses are restored with their original request correlation, rejected if the
+project fingerprint changed, materialized as a durable proposal, and advanced
+to `await_approval`. Invalid responses fail the execution closed, and validation
+never invokes the provider again.
 
 Inspect the project lock:
 
