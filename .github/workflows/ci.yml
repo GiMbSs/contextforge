@@ -66,10 +66,10 @@ jobs:
           contextforge evaluate tests/fixtures/evaluation/suites/core.json
           --output /tmp/contextforge-evaluation/core
           --fail-on-case-error
-          --minimum complete-evidence=0.625
-          --minimum context-precision=0.875
-          --minimum ndcg=0.58
-          --minimum required-artifact-recall=0.6875
+          --minimum complete-evidence=0.875
+          --minimum context-precision=1.0
+          --minimum ndcg=0.8
+          --minimum required-artifact-recall=0.875
 
       - name: Verify package build
         run: python -m build

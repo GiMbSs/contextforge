@@ -385,10 +385,10 @@ Patch-oriented fixtures are copied to a temporary directory before execution.
 The reviewed `core` 1.1 baseline is enforced in CI after two identical
 deterministic runs. Its primary thresholds are:
 
-- `complete-evidence=0.625`
-- `context-precision=0.875`
-- `ndcg=0.58`
-- `required-artifact-recall=0.6875`
+- `complete-evidence=0.875`
+- `context-precision=1.0`
+- `ndcg=0.8`
+- `required-artifact-recall=0.875`
 
 The intentionally unsolvable case remains in this aggregate, so the global
 required-artifact recall is not expected to be `1.0`. The direct-path smoke
