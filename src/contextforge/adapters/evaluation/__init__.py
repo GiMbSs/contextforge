@@ -5,6 +5,10 @@ from contextforge.adapters.evaluation.filesystem import (
     FilesystemEvaluationSuiteLoader,
     fingerprint_fixture_project,
 )
+from contextforge.adapters.evaluation.reporting import (
+    EvaluationReportPaths,
+    FilesystemEvaluationReportWriter,
+)
 from contextforge.adapters.evaluation.runner import (
     CONTEXTFORGE_STRATEGY_ID,
     EvaluationOutputValidator,
@@ -14,8 +18,10 @@ from contextforge.adapters.evaluation.runner import (
 __all__ = [
     "CONTEXTFORGE_STRATEGY_ID",
     "EvaluationOutputValidator",
+    "EvaluationReportPaths",
     "EvaluationSuiteLoadError",
     "FilesystemEvaluationCaseExecutor",
+    "FilesystemEvaluationReportWriter",
     "FilesystemEvaluationSuiteLoader",
     "fingerprint_fixture_project",
 ]

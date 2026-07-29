@@ -39,6 +39,16 @@ from contextforge.evaluation.ports import (
     EvaluationStrategy,
     EvaluationStrategyRequest,
 )
+from contextforge.evaluation.reporting import (
+    EVALUATION_RESULT_SCHEMA,
+    EVALUATION_RESULT_SCHEMA_VERSION,
+    AggregateMetric,
+    aggregate_metrics,
+    evaluation_result_document,
+    render_evaluation_json,
+    render_evaluation_markdown,
+    sanitize_report_text,
+)
 from contextforge.evaluation.runner import (
     EVALUATION_RUNNER_VERSION,
     CaseEvaluationOutput,
@@ -52,9 +62,12 @@ from contextforge.evaluation.runner import (
 
 __all__ = [
     "ALL_FILES_BASELINE_ID",
+    "EVALUATION_RESULT_SCHEMA",
+    "EVALUATION_RESULT_SCHEMA_VERSION",
     "EVALUATION_RUNNER_VERSION",
     "EXPLICIT_BASELINE_ID",
     "LEXICAL_BASELINE_ID",
+    "AggregateMetric",
     "ArtifactBudgetEstimate",
     "BaselineMetricDelta",
     "BudgetedAllFilesBaseline",
@@ -78,14 +91,19 @@ __all__ = [
     "RelevanceLevel",
     "StrategyResult",
     "StrategySelection",
+    "aggregate_metrics",
     "artifact_recall",
     "calculate_baseline_deltas",
     "complete_evidence_rate",
     "evaluate_context_efficiency",
     "evaluate_retrieval_metrics",
+    "evaluation_result_document",
     "has_complete_evidence",
     "normalized_discounted_cumulative_gain",
     "precision_over_judged",
     "recall_at_k",
     "reciprocal_rank",
+    "render_evaluation_json",
+    "render_evaluation_markdown",
+    "sanitize_report_text",
 ]
