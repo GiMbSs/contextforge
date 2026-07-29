@@ -52,6 +52,38 @@ def test_context_build_returns_selected_content_and_traceability(tmp_path: Path)
     assert result.stderr == ""
 
 
+def test_context_build_reuses_index_until_project_content_changes(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    command = [
+        "--project",
+        str(tmp_path),
+        "--format",
+        "json",
+        "context",
+        "build",
+        "Explain VALUE in module.py",
+    ]
+
+    first = runner.invoke(app, command)
+    pointer_path = tmp_path / ".contextforge" / "state" / "indexes" / "latest.json"
+    first_index_id = json.loads(pointer_path.read_text(encoding="utf-8"))["artifact_id"]
+    second = runner.invoke(app, command)
+    second_index_id = json.loads(pointer_path.read_text(encoding="utf-8"))["artifact_id"]
+
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    changed = runner.invoke(app, command)
+    changed_index_id = json.loads(pointer_path.read_text(encoding="utf-8"))["artifact_id"]
+
+    assert first.exit_code == 0, first.stderr
+    assert second.exit_code == 0, second.stderr
+    assert changed.exit_code == 0, changed.stderr
+    assert second_index_id == first_index_id
+    assert changed_index_id != first_index_id
+    changed_packet = json.loads(changed.stdout)["data"]["packet"]
+    assert "VALUE = 2" in changed_packet["items"][0]["content"]
+
+
 def test_context_build_enforces_agent_budget_bounds(tmp_path: Path) -> None:
     result = runner.invoke(
         app,

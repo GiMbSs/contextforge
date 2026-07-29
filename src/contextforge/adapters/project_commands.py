@@ -699,7 +699,7 @@ class LocalProjectCommandGateway:
             TaskKind.ANALYZE,
             RequestedOutput.ANALYSIS,
         )
-        self._scan(root)
+        self._scan(root, reuse_unchanged_inventory=True)
         prepared = ContextPreparationPipeline(
             inventory_storage=FilesystemInventoryStorage(root),
             index_storage=FilesystemIndexStorage(root),
@@ -1853,11 +1853,17 @@ class LocalProjectCommandGateway:
         )
         temporary.replace(destination)
 
-    def _scan(self, root: ProjectRoot) -> ProjectInventory:
+    def _scan(
+        self,
+        root: ProjectRoot,
+        *,
+        reuse_unchanged_inventory: bool = False,
+    ) -> ProjectInventory:
         return ProjectScan(
             self.scanner,
             FilesystemInventoryStorage(root),
             self.scanner_configuration,
+            reuse_unchanged_inventory=reuse_unchanged_inventory,
         ).execute(ScanProject(_project_id(root), root))
 
     def _prepare_project_state(self, root: ProjectRoot) -> ProjectIndex:

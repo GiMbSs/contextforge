@@ -59,12 +59,17 @@ class ProjectScan:
         scanner: IncrementalProjectScanner,
         storage: InventoryStorage,
         configuration: ScannerConfig,
+        *,
+        reuse_unchanged_inventory: bool = False,
     ) -> None:
         if not isinstance(configuration, ScannerConfig):
             raise TypeError("configuration must be a ScannerConfig")
+        if type(reuse_unchanged_inventory) is not bool:
+            raise TypeError("reuse_unchanged_inventory must be a boolean")
         self._scanner = scanner
         self._storage = storage
         self._configuration = configuration
+        self._reuse_unchanged_inventory = reuse_unchanged_inventory
 
     def execute(self, command: ScanProject) -> ProjectInventory:
         """Scan an authorized project and persist the resulting inventory."""
@@ -79,6 +84,15 @@ class ProjectScan:
         inventory = self._scanner.scan(request, previous)
         if inventory.project_id != command.project_id:
             raise ValueError("Scanner returned an inventory for another project")
+        if (
+            self._reuse_unchanged_inventory
+            and previous is not None
+            and inventory.project_fingerprint == previous.project_fingerprint
+            and inventory.status is previous.status
+            and inventory.applied_exclusion_rules == previous.applied_exclusion_rules
+            and inventory.diagnostics == previous.diagnostics
+        ):
+            return previous
         self._storage.save(inventory)
         return inventory
 

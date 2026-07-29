@@ -179,6 +179,55 @@ def test_scan_reuses_latest_inventory_and_persists_result(tmp_path: Path) -> Non
     assert storage.saved is result
 
 
+def test_scan_can_preserve_equivalent_inventory_for_read_only_context(
+    tmp_path: Path,
+) -> None:
+    project_id = new_project_id()
+    previous = _inventory(project_id)
+    equivalent = _inventory(project_id)
+    scanner = _IncrementalScanner(equivalent)
+    storage = _InventoryStorage(previous)
+    command = ScanProject(
+        project_id,
+        ProjectRoot(tmp_path.resolve(), ProjectRootSource.EXPLICIT),
+    )
+
+    returned = ProjectScan(
+        scanner,
+        storage,
+        ScannerConfig(),
+        reuse_unchanged_inventory=True,
+    ).execute(command)
+
+    assert returned is previous
+    assert storage.saved is None
+
+
+def test_scan_does_not_reuse_inventory_when_diagnostics_change(tmp_path: Path) -> None:
+    project_id = new_project_id()
+    previous = _inventory(project_id)
+    changed = _inventory(
+        project_id,
+        diagnostics=DiagnosticCollection((_diagnostic("SCAN_WARNING"),)),
+    )
+    scanner = _IncrementalScanner(changed)
+    storage = _InventoryStorage(previous)
+    command = ScanProject(
+        project_id,
+        ProjectRoot(tmp_path.resolve(), ProjectRootSource.EXPLICIT),
+    )
+
+    returned = ProjectScan(
+        scanner,
+        storage,
+        ScannerConfig(),
+        reuse_unchanged_inventory=True,
+    ).execute(command)
+
+    assert returned is changed
+    assert storage.saved is changed
+
+
 def test_index_reuses_prior_index_and_preserves_all_diagnostics() -> None:
     project_id = new_project_id()
     scan_diagnostic = _diagnostic("SCAN_WARNING")
