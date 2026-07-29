@@ -162,13 +162,18 @@ def test_fixture_fingerprint_is_content_and_path_sensitive(tmp_path: Path) -> No
     assert len({initial, content_changed, path_changed}) == 3
 
 
-def test_versioned_core_suite_loads_with_three_minimal_cases() -> None:
+def test_versioned_core_suite_loads_with_expanded_cases() -> None:
     root = Path(__file__).parent / "fixtures" / "evaluation"
 
     suite = FilesystemEvaluationSuiteLoader(root).load(Path("suites/core.json"))
 
     assert tuple(case.case_id for case in suite.cases) == (
         "budget-pressure",
+        "competing-symbols",
+        "configuration-implementation",
         "dependency-closure",
         "direct-path",
+        "direct-symbol",
+        "lexical-synonym",
+        "unsolvable-missing-artifact",
     )

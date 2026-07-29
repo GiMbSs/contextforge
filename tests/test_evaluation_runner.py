@@ -117,6 +117,37 @@ def test_runner_completes_every_initial_core_case() -> None:
     assert all(record.status is CaseRunStatus.COMPLETED for record in result.cases)
 
 
+def test_core_suite_covers_retrieval_dependencies_and_insufficient_evidence() -> None:
+    suite = _suite()
+
+    assert len(suite.cases) == 8
+    assert {
+        "direct",
+        "symbol",
+        "synonym",
+        "ambiguity",
+        "dependency",
+        "budget",
+        "unsolvable",
+    } <= {tag for case in suite.cases for tag in case.tags}
+
+
+def test_unsolvable_case_reports_zero_required_recall_without_failing() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+    result = EvaluationRunner(
+        FilesystemEvaluationCaseExecutor(loader),
+        clock=lambda: FIXED_TIME,
+    ).run(_suite(), case_ids=("unsolvable-missing-artifact",))
+
+    assert result.cases[0].status is CaseRunStatus.COMPLETED
+    primary_recall = next(
+        metric
+        for metric in result.run.metric_results
+        if metric.strategy_id == "contextforge" and metric.metric_name == "required-artifact-recall"
+    )
+    assert primary_recall.value == 0.0
+
+
 class _IsolationRecordingExecutor(FilesystemEvaluationCaseExecutor):
     seen_root: Path | None = None
 
