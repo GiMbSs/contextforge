@@ -1,7 +1,11 @@
 # MVP Acceptance Report
 
-**Release:** ContextForge 0.1.0  
-**Date:** 2026-07-26  
+**Release:** ContextForge 0.1.0
+
+**Initial acceptance:** 2026-07-26
+
+**Latest revalidation:** 2026-07-29
+
 **Reference:** CF-014 I100 — Execute the canonical MVP acceptance scenario
 
 ## Summary
@@ -9,6 +13,10 @@
 The canonical MVP acceptance scenario was executed successfully against a
 controlled fixture project. All 13 steps completed without errors and produced
 auditable artifacts.
+
+The scenario was reexecuted after the retrieval, grounded-response validation,
+evaluation-gate, and reproducible-release improvements. The same 13-step
+workflow passed without changing its approval or mutation boundaries.
 
 ## Fixture project
 
@@ -58,13 +66,17 @@ value = 42
 - Automated test: `tests/test_acceptance_scenario.py`
 - Transcript produced by the test: `.contextforge/acceptance/transcript.json`
   inside the fixture project.
+- Latest validation command:
+  `pytest -q tests/test_acceptance_scenario.py -s`
+- Latest result: `1 passed` on 2026-07-29.
 
 ## Known limitations
 
 - The acceptance scenario uses the deterministic mock provider. Real remote
   providers require separate configuration and credentials.
-- Retrieval and context construction use the deterministic filesystem-backed
-  implementations wired into the production command gateway.
+- Retrieval and context construction use the production scanner, Python-aware
+  index, lexical and structural ranking, evidence budgeting, and filesystem
+  materialization pipeline.
 - The deterministic mock provider is used so acceptance remains reproducible
   and does not require network access.
 
