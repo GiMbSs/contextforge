@@ -394,6 +394,13 @@ def evaluate(
             help="Require a primary aggregate METRIC=MINIMUM; repeatable and opt-in.",
         ),
     ] = None,
+    fail_on_case_error: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-case-error",
+            help="Exit with code 19 when any selected evaluation case fails.",
+        ),
+    ] = False,
 ) -> None:
     """Run a deterministic, read-only effectiveness evaluation."""
     try:
@@ -422,6 +429,15 @@ def evaluate(
     )
     typer.echo(f"JSON report: {paths.json_path}")
     typer.echo(f"Markdown report: {paths.markdown_path}")
+    failed_cases = tuple(record for record in result.cases if record.status.value == "failed")
+    if fail_on_case_error and failed_cases:
+        for record in failed_cases:
+            typer.echo(
+                f"Evaluation case failed: {record.case_id}: "
+                f"{sanitize_report_text(record.error_message or 'Case execution failed')}",
+                err=True,
+            )
+        raise typer.Exit(int(CliExitCode.EVALUATION_FAILURE))
     gate = evaluate_regression_gate(result, thresholds)
     if not gate.passed:
         for failure in gate.failures:

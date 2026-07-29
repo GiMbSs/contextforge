@@ -142,6 +142,7 @@ locally with:
 ```bash
 contextforge evaluate tests/fixtures/evaluation/suites/core.json \
   --case direct-path \
+  --fail-on-case-error \
   --minimum required-artifact-recall=1.0 \
   --output .contextforge/evaluations/latest
 ```

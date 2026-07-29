@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from contextforge.adapters.evaluation import FilesystemEvaluationCaseExecutor
 from contextforge.cli.main import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
@@ -54,6 +56,36 @@ def test_evaluate_threshold_failure_uses_stable_exit_code(tmp_path: Path) -> Non
 
     assert result.exit_code == 20
     assert "Regression: not-measured=missing" in result.stderr
+
+
+def test_evaluate_can_fail_when_a_selected_case_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_case(self: FilesystemEvaluationCaseExecutor, case: object) -> None:
+        del self, case
+        raise RuntimeError("deliberate case failure")
+
+    monkeypatch.setattr(FilesystemEvaluationCaseExecutor, "execute", fail_case)
+    output = tmp_path / "latest"
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            str(SUITE),
+            "--case",
+            "direct-path",
+            "--output",
+            str(output),
+            "--fail-on-case-error",
+        ],
+    )
+
+    assert result.exit_code == 19
+    assert "Evaluation case failed: direct-path: deliberate case failure" in result.stderr
+    assert output.with_suffix(".json").is_file()
+    assert output.with_suffix(".md").is_file()
 
 
 def test_evaluate_input_failure_uses_stable_exit_code(tmp_path: Path) -> None:

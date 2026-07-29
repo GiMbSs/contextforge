@@ -364,19 +364,22 @@ contextforge evaluate tests/fixtures/evaluation/suites/core.json \
 ```
 
 Use repeatable `--case` and `--tag` options to select a smoke subset. Individual
-case failures are recorded in both reports and do not abort later cases.
+case failures are recorded in both reports and do not abort later cases. Add
+`--fail-on-case-error` in automation to write the complete reports and then exit
+with code `19` if any selected case failed.
 
 Regression thresholds are opt-in:
 
 ```bash
 contextforge evaluate tests/fixtures/evaluation/suites/core.json \
   --case direct-path \
+  --fail-on-case-error \
   --minimum required-artifact-recall=1.0 \
   --output .contextforge/evaluations/latest
 ```
 
-A failed threshold exits with code `20`; suite, configuration, or output
-failures exit with code `19`. Evaluation does not invoke a provider by default.
+A failed threshold exits with code `20`; suite, configuration, output, or
+opted-in case failures exit with code `19`. Evaluation does not invoke a provider by default.
 Patch-oriented fixtures are copied to a temporary directory before execution.
 
 ## Diagnostics and troubleshooting

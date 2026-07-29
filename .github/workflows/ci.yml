@@ -57,6 +57,7 @@ jobs:
           contextforge evaluate tests/fixtures/evaluation/suites/core.json
           --case direct-path
           --output /tmp/contextforge-evaluation/latest
+          --fail-on-case-error
           --minimum required-artifact-recall=1.0
 
       - name: Verify package build
