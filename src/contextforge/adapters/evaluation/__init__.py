@@ -13,6 +13,7 @@ from contextforge.adapters.evaluation.runner import (
     CONTEXTFORGE_STRATEGY_ID,
     EvaluationOutputValidator,
     FilesystemEvaluationCaseExecutor,
+    FilesystemPatchBehaviorValidator,
 )
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "FilesystemEvaluationCaseExecutor",
     "FilesystemEvaluationReportWriter",
     "FilesystemEvaluationSuiteLoader",
+    "FilesystemPatchBehaviorValidator",
     "fingerprint_fixture_project",
 ]

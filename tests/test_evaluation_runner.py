@@ -11,7 +11,9 @@ import pytest
 from contextforge.adapters.evaluation import (
     FilesystemEvaluationCaseExecutor,
     FilesystemEvaluationSuiteLoader,
+    FilesystemPatchBehaviorValidator,
 )
+from contextforge.domain import ArtifactPath
 from contextforge.domain.tasks import RequestedOutput
 from contextforge.evaluation import (
     CaseEvaluationOutput,
@@ -172,3 +174,51 @@ def test_patch_cases_execute_only_on_temporary_fixture_copies() -> None:
     assert executor.seen_root is not None
     assert executor.seen_root != loader.fixture_root(original.fixture_project_id)
     assert not executor.seen_root.exists()
+
+
+def test_patch_behavior_is_measured_only_inside_the_temporary_copy() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+    original = next(case for case in _suite().cases if case.case_id == "direct-path")
+    patch_case = replace(
+        original,
+        requested_output=RequestedOutput.PATCH_PROPOSAL,
+        expected_changed_paths=(ArtifactPath("src/app.py"),),
+    )
+    original_app = loader.fixture_root(original.fixture_project_id) / "src" / "app.py"
+    original_content = original_app.read_text(encoding="utf-8")
+
+    def apply_patch(case: EvaluationCase, root: Path) -> None:
+        del case
+        target = root / "src" / "app.py"
+        target.write_text(
+            target.read_text(encoding="utf-8").replace(
+                "return format_greeting(name)",
+                "return format_greeting(name).upper()",
+            ),
+            encoding="utf-8",
+        )
+
+    def check_behavior(case: EvaluationCase, root: Path) -> bool:
+        del case
+        return "return format_greeting(name).upper()" in (root / "src" / "app.py").read_text(
+            encoding="utf-8"
+        )
+
+    result = EvaluationRunner(
+        FilesystemEvaluationCaseExecutor(
+            loader,
+            validators=(FilesystemPatchBehaviorValidator(apply_patch, check_behavior),),
+        ),
+        clock=lambda: FIXED_TIME,
+    ).run(replace(_suite(), cases=(patch_case,)))
+
+    metrics = {
+        metric.metric_name: metric.value
+        for metric in result.run.metric_results
+        if metric.strategy_id == "contextforge"
+    }
+    assert result.cases[0].status is CaseRunStatus.COMPLETED
+    assert metrics["patch-expected-path-recall"] == 1.0
+    assert metrics["patch-paths-exact"] == 1.0
+    assert metrics["patch-fixture-tests-passed"] == 1.0
+    assert original_app.read_text(encoding="utf-8") == original_content

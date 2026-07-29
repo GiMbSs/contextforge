@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,11 +52,79 @@ class EvaluationOutputValidator(Protocol):
     def validate(
         self,
         case: EvaluationCase,
+        root: Path,
         bundle: ContextBundle,
         retrieval_result: RetrievalResult,
     ) -> tuple[MetricResult, ...]:
         """Return bounded validation metrics for the primary strategy."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class FilesystemPatchBehaviorValidator:
+    """Apply and behaviorally validate a patch inside an isolated fixture root."""
+
+    patch_applier: Callable[[EvaluationCase, Path], None]
+    behavior_check: Callable[[EvaluationCase, Path], bool]
+
+    def validate(
+        self,
+        case: EvaluationCase,
+        root: Path,
+        bundle: ContextBundle,
+        retrieval_result: RetrievalResult,
+    ) -> tuple[MetricResult, ...]:
+        """Measure resulting paths and behavior after applying a candidate patch."""
+        del bundle, retrieval_result
+        if case.requested_output.value != "patch_proposal" and not case.expected_changed_paths:
+            return ()
+
+        isolated_root = root.resolve(strict=True)
+        if not isolated_root.is_dir():
+            raise ValueError("Patch validation root must be a directory")
+        before = self._snapshot(isolated_root)
+        self.patch_applier(case, isolated_root)
+        after = self._snapshot(isolated_root)
+
+        changed = {
+            path for path in before.keys() | after.keys() if before.get(path) != after.get(path)
+        }
+        expected = {str(path) for path in case.expected_changed_paths}
+        expected_recall = (
+            len(changed & expected) / len(expected) if expected else float(not changed)
+        )
+        exact_paths = changed == expected
+        behavior_passed = bool(self.behavior_check(case, isolated_root))
+        return (
+            MetricResult(
+                case.case_id,
+                CONTEXTFORGE_STRATEGY_ID,
+                "patch-expected-path-recall",
+                expected_recall,
+            ),
+            MetricResult(
+                case.case_id,
+                CONTEXTFORGE_STRATEGY_ID,
+                "patch-paths-exact",
+                float(exact_paths),
+            ),
+            MetricResult(
+                case.case_id,
+                CONTEXTFORGE_STRATEGY_ID,
+                "patch-fixture-tests-passed",
+                float(behavior_passed),
+            ),
+        )
+
+    @staticmethod
+    def _snapshot(root: Path) -> dict[str, str]:
+        snapshot: dict[str, str] = {}
+        for candidate in sorted(root.rglob("*")):
+            if not candidate.is_file():
+                continue
+            relative = candidate.relative_to(root).as_posix()
+            snapshot[relative] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        return snapshot
 
 
 @dataclass(slots=True)
@@ -153,7 +222,7 @@ class FilesystemEvaluationCaseExecutor:
             ).quality_metrics()
         )
         for validator in self.validators:
-            metrics.extend(validator.validate(case, bundle, retrieval))
+            metrics.extend(validator.validate(case, root, bundle, retrieval))
         return CaseEvaluationOutput(tuple(strategy_results), tuple(metrics))
 
     @staticmethod
