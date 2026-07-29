@@ -53,6 +53,12 @@ def _unique_hits(keywords: tuple[str, ...], text: str) -> tuple[str, ...]:
     return tuple(keyword for keyword in keywords if keyword in normalized)
 
 
+def _estimate_tokens(character_count: int) -> int:
+    if character_count == 0:
+        return 0
+    return max(1, (character_count * 11 + 39) // 40)
+
+
 @dataclass(frozen=True, slots=True)
 class _ScoredCandidate:
     candidate_id: str
@@ -112,18 +118,30 @@ class SimpleContextRetriever:
 
         candidates.sort(key=lambda item: (-item.score, item.estimated_bytes, item.candidate_id))
 
-        selected, excluded = self._select_under_budget(candidates, request.budget)
+        unique, duplicates = self._deduplicate_candidates(candidates)
+        selected, excluded, exclusion_reasons = self._select_under_budget(unique, request.budget)
+        excluded = [*duplicates, *excluded]
+        exclusion_reasons.update(
+            (candidate.candidate_id, SelectionReason.DUPLICATE_CONTENT) for candidate in duplicates
+        )
         is_fallback = False
 
         if not selected and all(item.score == 0 for item in candidates):
             fallback = self._fallback_candidates(tuple(artifact_by_id.values()), units_by_artifact)
-            selected, excluded = self._select_under_budget(
+            selected, excluded, exclusion_reasons = self._select_under_budget(
                 fallback, request.budget, require_positive_score=False
             )
             candidates = fallback
             is_fallback = True
 
-        return self._build_result(request, candidates, selected, excluded, is_fallback)
+        return self._build_result(
+            request,
+            candidates,
+            selected,
+            excluded,
+            exclusion_reasons,
+            is_fallback,
+        )
 
     def _score_search_units(
         self,
@@ -232,25 +250,107 @@ class SimpleContextRetriever:
         budget: ContextBudget,
         *,
         require_positive_score: bool = True,
-    ) -> tuple[list[_ScoredCandidate], list[_ScoredCandidate]]:
+    ) -> tuple[
+        list[_ScoredCandidate],
+        list[_ScoredCandidate],
+        dict[str, SelectionReason],
+    ]:
         selected: list[_ScoredCandidate] = []
         excluded: list[_ScoredCandidate] = []
+        exclusion_reasons: dict[str, SelectionReason] = {}
         used_bytes = 0
+        used_characters = 0
+        used_tokens = 0
+        selected_artifacts: set[ArtifactId] = set()
+        selected_excerpts = 0
         for candidate in candidates:
             if require_positive_score and candidate.score <= 0:
                 excluded.append(candidate)
+                exclusion_reasons[candidate.candidate_id] = (
+                    SelectionReason.BELOW_RELEVANCE_THRESHOLD
+                )
                 continue
+            estimated_tokens = _estimate_tokens(candidate.estimated_characters)
             over_items = budget.max_items is not None and len(selected) >= budget.max_items
             over_bytes = (
                 budget.max_bytes is not None
                 and used_bytes + candidate.estimated_bytes > budget.max_bytes
             )
-            if over_items or over_bytes:
+            over_characters = (
+                budget.max_characters is not None
+                and used_characters + candidate.estimated_characters > budget.max_characters
+            )
+            over_tokens = (
+                budget.max_estimated_tokens is not None
+                and used_tokens + estimated_tokens > budget.max_estimated_tokens
+            )
+            over_artifacts = (
+                budget.max_artifacts is not None
+                and candidate.artifact_id not in selected_artifacts
+                and len(selected_artifacts) >= budget.max_artifacts
+            )
+            over_excerpts = (
+                budget.max_excerpts is not None
+                and candidate.candidate_type is CandidateType.SOURCE_EXCERPT
+                and selected_excerpts >= budget.max_excerpts
+            )
+            over_item_bytes = (
+                budget.max_item_bytes is not None
+                and candidate.estimated_bytes > budget.max_item_bytes
+            )
+            if any(
+                (
+                    over_items,
+                    over_bytes,
+                    over_characters,
+                    over_tokens,
+                    over_artifacts,
+                    over_excerpts,
+                    over_item_bytes,
+                )
+            ):
                 excluded.append(candidate)
+                exclusion_reasons[candidate.candidate_id] = SelectionReason.CONTEXT_BUDGET_EXCEEDED
             else:
                 selected.append(candidate)
                 used_bytes += candidate.estimated_bytes
-        return selected, excluded
+                used_characters += candidate.estimated_characters
+                used_tokens += estimated_tokens
+                selected_artifacts.add(candidate.artifact_id)
+                if candidate.candidate_type is CandidateType.SOURCE_EXCERPT:
+                    selected_excerpts += 1
+        return selected, excluded, exclusion_reasons
+
+    @staticmethod
+    def _deduplicate_candidates(
+        candidates: list[_ScoredCandidate],
+    ) -> tuple[list[_ScoredCandidate], list[_ScoredCandidate]]:
+        unique: list[_ScoredCandidate] = []
+        duplicates: list[_ScoredCandidate] = []
+        seen: set[tuple[object, ...]] = set()
+        for candidate in candidates:
+            location = candidate.location
+            span = (
+                (
+                    candidate.artifact_id,
+                    candidate.content_reference,
+                    None,
+                )
+                if location is None
+                else (
+                    location.artifact_id,
+                    location.start_line,
+                    location.start_column,
+                    location.end_line,
+                    location.end_column,
+                )
+            )
+            if span in seen:
+                duplicates.append(candidate)
+            else:
+                seen.add(span)
+                unique.append(candidate)
+        return unique, duplicates
 
     def _build_result(
         self,
@@ -258,6 +358,7 @@ class SimpleContextRetriever:
         candidates: list[_ScoredCandidate],
         selected: list[_ScoredCandidate],
         excluded: list[_ScoredCandidate],
+        exclusion_reasons: dict[str, SelectionReason],
         is_fallback: bool = False,
     ) -> RetrievalResult:
         retrieval_id = new_retrieval_id()
@@ -282,7 +383,11 @@ class SimpleContextRetriever:
                 symbols += 1
 
         for candidate in excluded:
-            rationale = self._excluded_rationale(candidate, is_fallback=is_fallback)
+            rationale = self._excluded_rationale(
+                candidate,
+                reason=exclusion_reasons.get(candidate.candidate_id),
+                is_fallback=is_fallback,
+            )
             retrieval_candidates.append(self._to_retrieval_candidate(candidate, rationale))
             rationales.append(rationale)
 
@@ -315,8 +420,12 @@ class SimpleContextRetriever:
                 candidates_budget_excluded=sum(
                     1
                     for candidate in excluded
-                    if self._excluded_rationale(candidate, is_fallback=is_fallback).primary_reason
+                    if exclusion_reasons.get(candidate.candidate_id)
                     is SelectionReason.CONTEXT_BUDGET_EXCEEDED
+                ),
+                duplicates_suppressed=sum(
+                    reason is SelectionReason.DUPLICATE_CONTENT
+                    for reason in exclusion_reasons.values()
                 ),
                 estimated_selected_tokens=sum(
                     item.estimated_tokens or 0 for item in selected_items
@@ -342,6 +451,7 @@ class SimpleContextRetriever:
             if rationale.decision is SelectionDecision.SELECTED
             else CandidateOutcome.EXCLUDED,
             estimated_bytes=candidate.estimated_bytes,
+            estimated_tokens=_estimate_tokens(candidate.estimated_characters),
             artifact_id=candidate.artifact_id,
             location=candidate.location,
             rationale=rationale,
@@ -363,6 +473,7 @@ class SimpleContextRetriever:
             location=candidate.location,
             estimated_bytes=candidate.estimated_bytes,
             estimated_characters=candidate.estimated_characters,
+            estimated_tokens=_estimate_tokens(candidate.estimated_characters),
             score_breakdown=self._score_breakdown(candidate),
             content_fingerprint=candidate.content_fingerprint,
             sensitivity_classification="standard",
@@ -392,9 +503,14 @@ class SimpleContextRetriever:
         self,
         candidate: _ScoredCandidate,
         *,
+        reason: SelectionReason | None = None,
         is_fallback: bool = False,
     ) -> SelectionRationale:
-        if is_fallback or candidate.score > 0:
+        primary_reason: SelectionReason
+        if reason is SelectionReason.DUPLICATE_CONTENT:
+            primary_reason = reason
+            explanation = "Excluded because another candidate covers the same source span."
+        elif reason is SelectionReason.CONTEXT_BUDGET_EXCEEDED or is_fallback:
             primary_reason = SelectionReason.CONTEXT_BUDGET_EXCEEDED
             explanation = "Excluded because the candidate does not fit within the Context Budget."
         else:

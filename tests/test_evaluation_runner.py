@@ -87,19 +87,34 @@ def test_runner_rejects_unknown_case_filter() -> None:
         EvaluationRunner(_RecordingExecutor()).run(_suite(), case_ids=("missing",))
 
 
-def test_runner_captures_production_pipeline_validation_failure_offline() -> None:
+def test_runner_completes_production_pipeline_offline() -> None:
     loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
     result = EvaluationRunner(
         FilesystemEvaluationCaseExecutor(loader),
         clock=lambda: FIXED_TIME,
     ).run(_suite(), case_ids=("direct-path",))
 
-    assert result.cases[0].status is CaseRunStatus.FAILED
-    assert result.cases[0].error_type == "CaseEvaluationError"
-    assert "ContextBundle validation failed" in result.cases[0].error_message
+    assert result.cases[0].status is CaseRunStatus.COMPLETED
+    assert result.cases[0].error_type is None
+    assert result.cases[0].error_message is None
     assert result.metadata.offline is True
     assert result.run.strategy_results
     assert result.run.metric_results
+    assert any(
+        metric.metric_name == "context-required-evidence-retained"
+        for metric in result.run.metric_results
+    )
+
+
+def test_runner_completes_every_initial_core_case() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+
+    result = EvaluationRunner(
+        FilesystemEvaluationCaseExecutor(loader),
+        clock=lambda: FIXED_TIME,
+    ).run(_suite())
+
+    assert all(record.status is CaseRunStatus.COMPLETED for record in result.cases)
 
 
 class _IsolationRecordingExecutor(FilesystemEvaluationCaseExecutor):

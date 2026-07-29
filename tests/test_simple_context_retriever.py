@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from contextforge.domain import (
@@ -81,6 +82,8 @@ def _request(
     *,
     max_items: int | None = None,
     max_bytes: int | None = None,
+    max_artifacts: int | None = None,
+    max_estimated_tokens: int | None = None,
 ) -> RetrievalRequest:
     return RetrievalRequest(
         task=TaskSpecification(
@@ -90,7 +93,12 @@ def _request(
             RequestedOutput.ANALYSIS,
         ),
         project_index=index,
-        budget=ContextBudget(max_items=max_items, max_bytes=max_bytes),
+        budget=ContextBudget(
+            max_items=max_items,
+            max_bytes=max_bytes,
+            max_artifacts=max_artifacts,
+            max_estimated_tokens=max_estimated_tokens,
+        ),
     )
 
 
@@ -154,3 +162,60 @@ def test_retriever_respects_max_items_budget() -> None:
     assert result.status is RetrievalStatus.COMPLETE
     assert len(result.selected_items) == 1
     assert result.statistics.excerpts_selected == 1
+
+
+def test_retriever_respects_artifact_and_token_budgets() -> None:
+    index = _make_index(
+        (
+            ("unit_a", "src/a.py", "helper " * 20),
+            ("unit_b", "src/b.py", "helper " * 20),
+        )
+    )
+
+    artifact_limited = SimpleContextRetriever().retrieve(
+        _request(
+            "explain helper",
+            index,
+            max_artifacts=1,
+            max_estimated_tokens=100,
+        )
+    )
+    token_limited = SimpleContextRetriever().retrieve(
+        _request(
+            "explain helper",
+            index,
+            max_artifacts=2,
+            max_estimated_tokens=1,
+        )
+    )
+
+    assert len({item.artifact_id for item in artifact_limited.selected_items}) == 1
+    assert artifact_limited.statistics.candidates_budget_excluded == 1
+    assert token_limited.status is RetrievalStatus.INCOMPLETE
+    assert not token_limited.selected_items
+
+
+def test_retriever_suppresses_duplicate_source_spans() -> None:
+    index = _make_index((("unit_a", "src/a.py", "helper function"),))
+    original = index.search_units[0]
+    duplicate = replace(original, search_unit_id="unit_duplicate", order=1)
+    artifact = replace(
+        index.indexed_artifacts[0],
+        search_unit_ids=("unit_a", "unit_duplicate"),
+    )
+    duplicated_index = replace(
+        index,
+        indexed_artifacts=(artifact,),
+        search_units=(original, duplicate),
+    )
+
+    result = SimpleContextRetriever().retrieve(
+        _request("explain helper", duplicated_index, max_items=10)
+    )
+
+    assert len(result.selected_items) == 1
+    assert result.statistics.duplicates_suppressed == 1
+    assert any(
+        rationale.primary_reason is SelectionReason.DUPLICATE_CONTENT
+        for rationale in result.rationales
+    )

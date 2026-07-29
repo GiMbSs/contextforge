@@ -13,7 +13,7 @@ runner = CliRunner(env={"NO_COLOR": "1"})
 SUITE = Path(__file__).parent / "fixtures" / "evaluation" / "suites" / "core.json"
 
 
-def test_evaluate_writes_reports_offline_without_gating_case_failures(
+def test_evaluate_writes_reports_offline_for_successful_case(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "reports" / "latest"
@@ -31,7 +31,7 @@ def test_evaluate_writes_reports_offline_without_gating_case_failures(
     )
 
     assert result.exit_code == 0
-    assert "1 cases, 1 failed" in result.stdout
+    assert "1 cases, 0 failed" in result.stdout
     document = json.loads(output.with_suffix(".json").read_text(encoding="utf-8"))
     assert document["metadata"]["offline"] is True
     assert output.with_suffix(".md").is_file()
