@@ -14,6 +14,7 @@ runner = CliRunner(env={"NO_COLOR": "1"})
 @pytest.mark.parametrize("mode", ["argument", "stdin", "file"])
 def test_run_analysis_accepts_each_exact_task_source(tmp_path: Path, mode: str) -> None:
     task = "Explain this project."
+    (tmp_path / "main.py").write_text("def main(): pass\n", encoding="utf-8")
     arguments = [
         "--project",
         str(tmp_path),
@@ -93,3 +94,29 @@ def test_run_rejects_empty_and_non_analysis_execution(tmp_path: Path) -> None:
     assert "must not be empty" in empty.stderr
     assert patch_mode.exit_code == 2
     assert "--analysis-only is required" in patch_mode.stderr
+
+
+def test_run_analysis_produces_non_empty_context(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    src = project / "db.py"
+    src.write_text("def connect(): pass\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(project),
+            "--format",
+            "json",
+            "run",
+            "--analysis-only",
+            "Explain the database module.",
+        ],
+    )
+
+    assert result.exit_code == 0
+    context_path = project / ".contextforge" / "executions" / "latest-context.json"
+    assert context_path.is_file()
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context["statistics"]["item_count"] > 0

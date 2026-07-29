@@ -82,6 +82,10 @@ from contextforge.retrieval.scoring import (
     ScoreComponent,
     ScoreContribution,
 )
+from contextforge.retrieval.simple_retriever import (
+    SIMPLE_RETRIEVER_VERSION,
+    SimpleContextRetriever,
+)
 from contextforge.retrieval.structural import (
     STRUCTURAL_RETRIEVAL_STRATEGY_VERSION,
     StructuralRetrievalStrategy,
@@ -98,6 +102,7 @@ __all__ = [
     "LEXICAL_SEARCH_STRATEGY_VERSION",
     "RETRIEVAL_RESULT_ASSEMBLER_VERSION",
     "RETRIEVAL_SCORING_MODEL_VERSION",
+    "SIMPLE_RETRIEVER_VERSION",
     "STRUCTURAL_RETRIEVAL_STRATEGY_VERSION",
     "TASK_QUERY_NORMALIZER_VERSION",
     "ArtifactEligibilityRecord",
@@ -152,6 +157,7 @@ __all__ = [
     "SelectionDecision",
     "SelectionRationale",
     "SelectionReason",
+    "SimpleContextRetriever",
     "StructuralRetrievalStrategy",
     "StructuralRole",
     "StructuralSearchResult",
