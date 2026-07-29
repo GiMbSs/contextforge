@@ -34,6 +34,11 @@ from contextforge.application.execution_control import (
     StageDiagnostics,
     StageOutcome,
 )
+from contextforge.application.execution_recovery import (
+    ExecutionRecoveryAssessment,
+    RecoveryDisposition,
+    assess_execution_recovery,
+)
 from contextforge.application.indexing import (
     InventoryNotFoundError,
     InventoryStorage,
@@ -107,6 +112,7 @@ __all__ = [
     "ExecutionControlError",
     "ExecutionControlStorage",
     "ExecutionController",
+    "ExecutionRecoveryAssessment",
     "GetContextBundle",
     "GetEffectiveConfiguration",
     "GetPatchProposal",
@@ -144,10 +150,12 @@ __all__ = [
     "ProjectScan",
     "ProviderNotFoundError",
     "ProviderRegistry",
+    "RecoveryDisposition",
     "RejectPatchProposal",
     "ScanProject",
     "StageDiagnostics",
     "StageOutcome",
     "StaleProjectStateError",
     "StructuredPatchEngine",
+    "assess_execution_recovery",
 ]

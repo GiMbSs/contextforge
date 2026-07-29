@@ -163,13 +163,21 @@ application completes it. Patch application holds an exclusive project lock;
 a concurrent application fails with a project-state conflict instead of
 mutating files concurrently.
 
-Inspect or cancel a persisted execution:
+List, inspect, or cancel persisted executions:
 
 ```bash
+contextforge execution list
 contextforge execution show
 contextforge execution show execution_0123456789abcdef0123456789abcdef
 contextforge execution cancel execution_0123456789abcdef0123456789abcdef
 ```
+
+Execution output includes a conservative recovery assessment. Deterministic
+stages before provider invocation are `resumable`; approval and application
+boundaries are `awaiting_action`; stages with externally observable effects
+require `manual_review_required`; and completed or cancelled executions are
+`terminal`. ContextForge never automatically replays a provider call or project
+mutation whose outcome may already be externally visible.
 
 Inspect the project lock:
 

@@ -183,6 +183,12 @@ def execution_show(
     _execution_command(ctx, "show", execution_id)
 
 
+@execution_app.command("list")
+def execution_list(ctx: typer.Context) -> None:
+    """List persisted executions for the resolved project."""
+    _execution_command(ctx, "list", None)
+
+
 @execution_app.command("cancel")
 def execution_cancel(
     ctx: typer.Context,

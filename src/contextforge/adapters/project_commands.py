@@ -58,6 +58,7 @@ from contextforge.application import (
     RejectPatchProposal,
     ScanProject,
     StaleProjectStateError,
+    assess_execution_recovery,
 )
 from contextforge.configuration import (
     ProjectConfig,
@@ -316,15 +317,7 @@ class LocalProjectCommandGateway:
                 "command": "status",
                 "configuration_present": configuration.is_file(),
                 "execution": (
-                    {
-                        "execution_id": str(latest_execution.execution_id),
-                        "stage": latest_execution.stage.value,
-                        "status": latest_execution.status.value,
-                        "task_id": str(latest_execution.task_id),
-                        "workflow": latest_execution.workflow.value,
-                    }
-                    if latest_execution is not None
-                    else None
+                    _execution_payload(latest_execution) if latest_execution is not None else None
                 ),
                 "initialized": initialized,
                 "project_id": str(_project_id(root)),
@@ -1070,6 +1063,17 @@ class LocalProjectCommandGateway:
         execution_id: str | None = None,
     ) -> CliCommandResult:
         storage = FilesystemExecutionControlStorage(root)
+        if operation == "list":
+            return CliCommandResult(
+                {
+                    "command": "execution list",
+                    "executions": [
+                        _execution_payload(item)
+                        for item in storage.list_executions(_project_id(root))
+                    ],
+                    "status": "available",
+                }
+            )
         if execution_id is None:
             execution = storage.load_latest(_project_id(root))
         else:
@@ -1099,15 +1103,7 @@ class LocalProjectCommandGateway:
         return CliCommandResult(
             {
                 "command": f"execution {operation}",
-                "execution": {
-                    "completed_stages": [stage.value for stage in execution.completed_stages],
-                    "execution_id": str(execution.execution_id),
-                    "project_id": str(execution.project_id),
-                    "stage": execution.stage.value,
-                    "status": execution.status.value,
-                    "task_id": str(execution.task_id),
-                    "workflow": execution.workflow.value,
-                },
+                "execution": _execution_payload(execution),
                 "stage_outcomes": [
                     {
                         "diagnostics": _diagnostics(item.diagnostics),
@@ -1388,6 +1384,26 @@ def _execution_not_found() -> CliCommandResult:
             },
         ),
     )
+
+
+def _execution_payload(execution: Execution) -> dict[str, object]:
+    recovery = assess_execution_recovery(execution)
+    return {
+        "completed_stages": [stage.value for stage in execution.completed_stages],
+        "execution_id": str(execution.execution_id),
+        "project_id": str(execution.project_id),
+        "recovery": {
+            "disposition": recovery.disposition.value,
+            "reason": recovery.reason,
+            "resume_from": (
+                recovery.resume_from.value if recovery.resume_from is not None else None
+            ),
+        },
+        "stage": execution.stage.value,
+        "status": execution.status.value,
+        "task_id": str(execution.task_id),
+        "workflow": execution.workflow.value,
+    }
 
 
 def _lock_payload(lock: ProjectLockInfo | None) -> dict[str, object] | None:

@@ -19,8 +19,9 @@ workflows for building precise, traceable LLM context from a software project.
   with distinct analysis and patch workflow paths.
 - Cross-process patch lifecycle continuation and ownership-verified exclusive
   locking during project mutation.
-- CLI inspection and cancellation for persisted executions, plus conservative
-  explicit recovery for old locks whose owner process is confirmed absent.
+- CLI history, inspection, cancellation, and recovery classification for
+  persisted executions, plus conservative explicit recovery for old locks
+  whose owner process is confirmed absent.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

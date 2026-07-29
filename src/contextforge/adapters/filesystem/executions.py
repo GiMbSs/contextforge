@@ -245,6 +245,30 @@ class FilesystemExecutionControlStorage:
                 matches.append((destination.stat().st_mtime_ns, execution))
         return max(matches, key=lambda item: item[0])[1] if matches else None
 
+    def list_executions(self, project_id: ProjectId) -> tuple[Execution, ...]:
+        """List project executions newest first with every snapshot validated."""
+        if not self._directory.is_dir():
+            return ()
+        matches: list[tuple[int, Execution]] = []
+        for destination in self._directory.glob("execution_*/execution.json"):
+            try:
+                execution_id = ExecutionId.from_string(destination.parent.name)
+            except ValueError as error:
+                raise ExecutionStorageError(
+                    f"Invalid execution directory {destination.parent.name}"
+                ) from error
+            execution = self.load_execution(execution_id)
+            if execution is not None and execution.project_id == project_id:
+                matches.append((destination.stat().st_mtime_ns, execution))
+        return tuple(
+            execution
+            for _modified_at, execution in sorted(
+                matches,
+                key=lambda item: item[0],
+                reverse=True,
+            )
+        )
+
     def _execution_directory(self, execution_id: ExecutionId) -> Path:
         return self._directory / str(execution_id)
 
