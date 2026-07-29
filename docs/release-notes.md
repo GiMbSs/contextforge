@@ -23,6 +23,8 @@ workflows for building precise, traceable LLM context from a software project.
 - CLI history, inspection, cancellation, and recovery classification for
   persisted executions, plus conservative explicit recovery for old locks
   whose owner process is confirmed absent.
+- Deterministic execution resumption through prompt reconstruction, with a hard
+  stop before any provider invocation.
 - Local mock provider for repeatable, offline runs.
 - Ollama-compatible provider adapter (local and remote) via the `providers` extra.
 - Provider inspection and health checks (no project content transmitted).

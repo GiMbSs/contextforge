@@ -174,6 +174,7 @@ List, inspect, or cancel persisted executions:
 contextforge execution list
 contextforge execution show
 contextforge execution show execution_0123456789abcdef0123456789abcdef
+contextforge execution resume execution_0123456789abcdef0123456789abcdef
 contextforge execution cancel execution_0123456789abcdef0123456789abcdef
 ```
 
@@ -185,6 +186,12 @@ require `manual_review_required`; and completed or cancelled executions are
 mutation whose outcome may already be externally visible.
 Legacy executions without a persisted task are classified as
 `manual_review_required`.
+
+`execution resume` reconstructs the current scan, index, retrieval, Context
+Bundle, and prompt as needed, then pauses at `invoke_provider`. It does not call
+the configured provider. Continuing beyond that boundary requires a separate
+future action because a previous provider outcome cannot be inferred safely
+after a process interruption.
 
 Inspect the project lock:
 

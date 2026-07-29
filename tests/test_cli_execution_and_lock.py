@@ -15,6 +15,8 @@ from contextforge.application import ExecutionController
 from contextforge.cli.main import app
 from contextforge.domain import (
     Execution,
+    ExecutionStage,
+    ExecutionWorkflow,
     RequestedOutput,
     TaskKind,
     TaskSpecification,
@@ -38,7 +40,7 @@ def _payload(result: object) -> dict[str, object]:
 
 def test_execution_show_and_cancel_reopen_persisted_state(tmp_path: Path) -> None:
     root = _root(tmp_path)
-    execution = Execution(new_execution_id(), new_project_id(), new_task_id())
+    execution = Execution(new_execution_id(), _project_id(root), new_task_id())
     ExecutionController(execution, FilesystemExecutionControlStorage(root))
 
     shown = runner.invoke(
@@ -99,6 +101,119 @@ def test_execution_list_is_scoped_to_the_resolved_project(tmp_path: Path) -> Non
     assert isinstance(executions, list)
     assert [item["execution_id"] for item in executions] == [str(included.execution_id)]
     assert executions[0]["recovery"]["disposition"] == "resumable"
+
+
+def test_execution_commands_hide_another_project_execution(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    execution = Execution(new_execution_id(), new_project_id(), new_task_id())
+    ExecutionController(execution, FilesystemExecutionControlStorage(root))
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "show",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert _payload(result)["status"] == "failed"
+
+
+def test_execution_resume_reconstructs_only_deterministic_stages(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Explain deterministic recovery",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+        metadata=(("provider_id", "provider-that-must-not-run"),),
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+    ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["status"] == "paused_before_provider"
+    assert payload["execution"]["stage"] == "invoke_provider"  # type: ignore[index]
+    assert payload["execution"]["recovery"]["disposition"] == (  # type: ignore[index]
+        "manual_review_required"
+    )
+    assert (tmp_path / ".contextforge" / "executions" / "latest-context.json").is_file()
+    assert (tmp_path / ".contextforge" / "executions" / "latest-prompt.json").is_file()
+    assert task.task_text not in result.stdout
+
+
+def test_execution_resume_rejects_provider_boundary(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    storage = FilesystemExecutionControlStorage(root)
+    task = TaskSpecification(
+        new_task_id(),
+        "Do not invoke the provider",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+    )
+    execution = Execution(
+        new_execution_id(),
+        _project_id(root),
+        task.task_id,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+    controller = ExecutionController(execution, storage)
+    storage.save_task(execution.execution_id, task)
+    for stage in (
+        ExecutionStage.SCAN,
+        ExecutionStage.INDEX,
+        ExecutionStage.RETRIEVE,
+        ExecutionStage.BUILD_CONTEXT,
+        ExecutionStage.BUILD_PROMPT,
+        ExecutionStage.INVOKE_PROVIDER,
+    ):
+        controller.complete_stage(stage)
+
+    result = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "execution",
+            "resume",
+            str(execution.execution_id),
+        ],
+    )
+
+    assert result.exit_code == 14
+    assert _payload(result)["status"] == "recovery_rejected"
+    restored = storage.load_execution(execution.execution_id)
+    assert restored is not None
+    assert restored.stage is ExecutionStage.INVOKE_PROVIDER
 
 
 def test_lock_show_reports_only_non_secret_metadata(tmp_path: Path) -> None:

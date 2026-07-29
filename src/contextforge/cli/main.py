@@ -32,7 +32,7 @@ patch_app = typer.Typer(help="Inspect persisted patch proposals.")
 app.add_typer(patch_app, name="patch")
 config_app = typer.Typer(help="Inspect and update effective configuration.")
 app.add_typer(config_app, name="config")
-execution_app = typer.Typer(help="Inspect and cancel persisted executions.")
+execution_app = typer.Typer(help="Inspect, resume, and cancel persisted executions.")
 app.add_typer(execution_app, name="execution")
 lock_app = typer.Typer(help="Inspect and explicitly recover project locks.")
 app.add_typer(lock_app, name="lock")
@@ -199,6 +199,18 @@ def execution_cancel(
 ) -> None:
     """Cancel a persisted running execution."""
     _execution_command(ctx, "cancel", execution_id)
+
+
+@execution_app.command("resume")
+def execution_resume(
+    ctx: typer.Context,
+    execution_id: Annotated[
+        str | None,
+        typer.Argument(help="Execution identifier; defaults to the latest."),
+    ] = None,
+) -> None:
+    """Reconstruct deterministic stages and stop before provider invocation."""
+    _execution_command(ctx, "resume", execution_id)
 
 
 @lock_app.command("show")

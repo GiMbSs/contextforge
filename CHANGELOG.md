@@ -13,6 +13,8 @@ development are recorded in the Unreleased section.
   classification.
 - Persisted immutable task specifications with execution identity binding for
   restart-safe reconstruction.
+- Added safe deterministic execution resumption that stops before provider
+  invocation.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

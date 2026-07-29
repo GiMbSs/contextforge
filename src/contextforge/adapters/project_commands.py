@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path
 from typing import Protocol, cast
@@ -40,6 +41,8 @@ from contextforge.application import (
     ApplyPatchProposal,
     ApprovePatchProposal,
     BuildProjectIndex,
+    ContextPreparationPipeline,
+    ContextPreparationResult,
     ExecuteTask,
     ExecutionController,
     InitializeProject,
@@ -92,6 +95,7 @@ from contextforge.domain import (
     TaskSpecification,
     fingerprint_content,
     new_execution_id,
+    new_inference_request_id,
     new_task_id,
 )
 from contextforge.indexer import (
@@ -106,7 +110,15 @@ from contextforge.patch import (
     PatchSourceState,
 )
 from contextforge.project import ProjectRoot, resolve_project_root
-from contextforge.prompt import InferenceRequest
+from contextforge.prompt import (
+    DeliveryRequirements,
+    InferenceRequest,
+    PromptLimits,
+    PromptMeasurer,
+    PromptTemplateAssembler,
+    analysis_response_contract,
+    patch_response_contract,
+)
 from contextforge.provider import (
     MOCK_MODEL_ID,
     MOCK_PROVIDER_ID,
@@ -397,6 +409,7 @@ class LocalProjectCommandGateway:
             task_text,
             TaskKind.EXPLAIN,
             RequestedOutput.ANALYSIS,
+            metadata=(("provider_id", provider_id),),
         )
         storage = FilesystemExecutionControlStorage(root)
         controller = ExecutionController(
@@ -466,6 +479,7 @@ class LocalProjectCommandGateway:
             task_text,
             TaskKind.MODIFY,
             RequestedOutput.PATCH_PROPOSAL,
+            metadata=(("provider_id", provider_id),),
         )
         storage = FilesystemExecutionControlStorage(root)
         controller = ExecutionController(
@@ -1097,6 +1111,8 @@ class LocalProjectCommandGateway:
             execution = storage.load_execution(selected_id)
         if execution is None:
             return _execution_not_found()
+        if execution.project_id != _project_id(root):
+            return _execution_not_found()
         if operation == "cancel":
             try:
                 ExecutionController.resume(execution, storage).cancel()
@@ -1107,6 +1123,8 @@ class LocalProjectCommandGateway:
                     _diagnostics(_execution_failure_diagnostics(error)),
                 )
             execution = storage.load_execution(execution.execution_id) or execution
+        elif operation == "resume":
+            return self._resume_execution(root, execution, storage)
         elif operation != "show":
             return CliCommandResult(
                 {"status": "failed"},
@@ -1129,6 +1147,89 @@ class LocalProjectCommandGateway:
                     for item in stages
                 ],
                 "status": "cancelled" if operation == "cancel" else "available",
+            }
+        )
+
+    def _resume_execution(
+        self,
+        root: ProjectRoot,
+        execution: Execution,
+        storage: FilesystemExecutionControlStorage,
+    ) -> CliCommandResult:
+        task = storage.load_task(execution.execution_id)
+        assessment = assess_execution_recovery(
+            execution,
+            task_available=task is not None,
+        )
+        if assessment.disposition.value != "resumable" or task is None:
+            return CliCommandResult(
+                {
+                    "command": "execution resume",
+                    "execution": _execution_payload(
+                        execution,
+                        task_available=task is not None,
+                    ),
+                    "status": "recovery_rejected",
+                },
+                CliExitCode.PROJECT_STATE_CONFLICT,
+            )
+        controller = ExecutionController.resume(execution, storage)
+        try:
+            if controller.execution.stage is ExecutionStage.RESOLVE:
+                controller.complete_stage(ExecutionStage.SCAN)
+            if controller.execution.stage is ExecutionStage.SCAN:
+                inventory = self._scan(root)
+                controller.complete_stage(ExecutionStage.INDEX, inventory.diagnostics)
+            else:
+                inventory = self._scan(root)
+            if controller.execution.stage is ExecutionStage.INDEX:
+                project_index = self._index_inventory(root, inventory)
+                controller.complete_stage(
+                    ExecutionStage.RETRIEVE,
+                    project_index.diagnostics,
+                )
+
+            prepared = ContextPreparationPipeline(
+                inventory_storage=FilesystemInventoryStorage(root),
+                index_storage=FilesystemIndexStorage(root),
+                indexer=DeterministicProjectIndexer(_LocalSource(root.path)),
+                retriever=SimpleContextRetriever(),
+                context_builder=SimpleContextBuilder(root.path),
+                budget=ContextBudget(max_items=20, max_bytes=64_000),
+            ).prepare(
+                ExecuteTask(
+                    execution.project_id,
+                    task,
+                    _task_provider_id(task),
+                )
+            )
+            if controller.execution.stage is ExecutionStage.RETRIEVE:
+                controller.complete_stage(
+                    ExecutionStage.BUILD_CONTEXT,
+                    prepared.diagnostics,
+                )
+            self._persist_context(root, prepared.context_bundle)
+            if controller.execution.stage is ExecutionStage.BUILD_CONTEXT:
+                controller.complete_stage(ExecutionStage.BUILD_PROMPT)
+            if controller.execution.stage is ExecutionStage.BUILD_PROMPT:
+                request = _build_inference_request(execution, task, prepared)
+                self._persist_prompt(root, request)
+                controller.complete_stage(ExecutionStage.INVOKE_PROVIDER)
+        except Exception as error:
+            controller.fail(_execution_failure_diagnostics(error))
+            return CliCommandResult(
+                {"command": "execution resume", "status": "failed"},
+                CliExitCode.PROJECT_STATE_CONFLICT,
+                _diagnostics(_execution_failure_diagnostics(error)),
+            )
+        return CliCommandResult(
+            {
+                "command": "execution resume",
+                "execution": _execution_payload(
+                    controller.execution,
+                    task_available=True,
+                ),
+                "status": "paused_before_provider",
             }
         )
 
@@ -1424,6 +1525,56 @@ def _execution_payload(
         "task_id": str(execution.task_id),
         "workflow": execution.workflow.value,
     }
+
+
+def _task_provider_id(task: TaskSpecification) -> str:
+    provider_id = dict(task.metadata).get("provider_id")
+    return provider_id if isinstance(provider_id, str) and provider_id else MOCK_PROVIDER_ID
+
+
+def _build_inference_request(
+    execution: Execution,
+    task: TaskSpecification,
+    prepared: ContextPreparationResult,
+) -> InferenceRequest:
+    bundle = prepared.context_bundle
+    inventory = prepared.inventory
+    contract = (
+        analysis_response_contract()
+        if execution.workflow is ExecutionWorkflow.ANALYSIS
+        else patch_response_contract()
+    )
+    assembly = PromptTemplateAssembler().assemble(
+        task,
+        bundle,
+        ContextBundleSerializer().serialize(bundle),
+        contract,
+    )
+    measurements = PromptMeasurer().measure(assembly, bundle, PromptLimits())
+    required_capabilities = (
+        ("structured_output",)
+        if execution.workflow is ExecutionWorkflow.ANALYSIS
+        else ("structured_output", "structured_patch")
+    )
+    return InferenceRequest(
+        new_inference_request_id(),
+        task.task_id,
+        bundle.bundle_id,
+        execution.project_id,
+        inventory.project_fingerprint,
+        assembly.template_version,
+        assembly.messages,
+        contract,
+        DeliveryRequirements(
+            required_capabilities,
+            contains_sensitive_context=measurements.sensitive_item_count > 0,
+            structured_output_required=True,
+        ),
+        measurements,
+        prepared.diagnostics,
+        datetime.now(UTC),
+        (("provider_id", _task_provider_id(task)),),
+    )
 
 
 def _lock_payload(lock: ProjectLockInfo | None) -> dict[str, object] | None:
