@@ -41,6 +41,7 @@ _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
 }
 _CURRENT_BEHAVIOR_TERMS = frozenset({"active", "current", "production", "runtime"})
 _HISTORICAL_MARKERS = frozenset({"archive", "deprecated", "historical", "legacy"})
+_BROAD_CONTEXT_TERMS = frozenset({"codebase", "project", "repository"})
 
 
 def _normalize(value: str) -> str:
@@ -118,11 +119,27 @@ class SimpleContextRetriever:
             raise TypeError("request must be a RetrievalRequest")
 
         query = self._normalizer.normalize(request.task)
+        composite_identifiers = tuple(
+            token for token in query.normalized_text.split() if "_" in token or "." in token
+        )
         keywords = _expand_keywords(
             tuple(
                 term.normalized
                 for term in query.terms
                 if term.kind.value == "keyword" and len(term.normalized) >= 3
+            )
+            + composite_identifiers
+        )
+        specific_signals = tuple(
+            dict.fromkeys(
+                _normalize(value)
+                for value in (
+                    *query.explicit_paths,
+                    *query.filenames,
+                    *query.symbols,
+                    *composite_identifiers,
+                    *(keyword for keyword in keywords if "_" in keyword or "." in keyword),
+                )
             )
         )
 
@@ -173,6 +190,8 @@ class SimpleContextRetriever:
             excluded,
             exclusion_reasons,
             is_fallback,
+            specific_signals,
+            bool(_BROAD_CONTEXT_TERMS.intersection(keywords)),
         )
 
     def _score_search_units(
@@ -421,6 +440,8 @@ class SimpleContextRetriever:
         excluded: list[_ScoredCandidate],
         exclusion_reasons: dict[str, SelectionReason],
         is_fallback: bool = False,
+        specific_signals: tuple[str, ...] = (),
+        broad_context_requested: bool = False,
     ) -> RetrievalResult:
         retrieval_id = new_retrieval_id()
 
@@ -452,12 +473,32 @@ class SimpleContextRetriever:
             retrieval_candidates.append(self._to_retrieval_candidate(candidate, rationale))
             rationales.append(rationale)
 
+        sufficient_evidence = bool(selected) and (not is_fallback or broad_context_requested)
+        if sufficient_evidence and specific_signals:
+            sufficient_evidence = any(
+                signal
+                in {
+                    *candidate.path_hits,
+                    *candidate.name_hits,
+                    *candidate.content_hits,
+                }
+                for candidate in selected
+                for signal in specific_signals
+            )
+
         diagnostics: list[Diagnostic] = []
         if not selected:
             diagnostics.append(
                 _diagnostic(
                     "RETRIEVAL_NO_RELEVANT_CONTEXT",
                     "Simple retriever produced no selected context items.",
+                )
+            )
+        elif not sufficient_evidence:
+            diagnostics.append(
+                _diagnostic(
+                    "RETRIEVAL_INSUFFICIENT_CONTEXT",
+                    "Selected context does not resolve the task's specific references.",
                 )
             )
 
@@ -492,7 +533,9 @@ class SimpleContextRetriever:
                     item.estimated_tokens or 0 for item in selected_items
                 ),
             ),
-            status=RetrievalStatus.COMPLETE if selected else RetrievalStatus.INCOMPLETE,
+            status=(
+                RetrievalStatus.COMPLETE if sufficient_evidence else RetrievalStatus.INCOMPLETE
+            ),
             created_at=datetime.now(UTC),
         )
 

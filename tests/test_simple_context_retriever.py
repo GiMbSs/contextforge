@@ -215,13 +215,37 @@ def test_retriever_falls_back_to_smallest_artifacts_when_no_match() -> None:
 
     result = retriever.retrieve(request)
 
-    assert result.status is RetrievalStatus.COMPLETE
+    assert result.status is RetrievalStatus.INCOMPLETE
     assert len(result.selected_items) == 1
     selected = result.selected_items[0]
     assert selected.candidate_type is CandidateType.FULL_ARTIFACT
     assert selected.content_reference == "src/small.py"
     assert selected.rationale.primary_reason is SelectionReason.REQUIRED_CONTEXT
     assert selected.candidate_id == f"artifact-{selected.artifact_id}"
+    assert any(
+        str(diagnostic.code) == "RETRIEVAL_INSUFFICIENT_CONTEXT"
+        for diagnostic in result.diagnostics
+    )
+
+
+def test_retriever_marks_unresolved_specific_identifier_as_insufficient() -> None:
+    index = _make_index(
+        (
+            ("unit_docs", "docs/runtime.md", "runtime behavior overview"),
+            ("unit_service", "src/service.py", "greeting implementation"),
+        )
+    )
+
+    result = SimpleContextRetriever().retrieve(
+        _request("Explain missing_runtime_policy.", index, max_artifacts=1)
+    )
+
+    assert result.selected_items
+    assert result.status is RetrievalStatus.INCOMPLETE
+    assert any(
+        str(diagnostic.code) == "RETRIEVAL_INSUFFICIENT_CONTEXT"
+        for diagnostic in result.diagnostics
+    )
 
 
 def test_retriever_respects_max_items_budget() -> None:
