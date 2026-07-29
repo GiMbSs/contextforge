@@ -1,5 +1,6 @@
 """Tests for I079 global CLI option parsing."""
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -8,6 +9,13 @@ from contextforge.cli import GlobalOptions
 from contextforge.cli.main import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def test_terminal_normalization_preserves_styled_option_text() -> None:
+    styled = "\x1b[1m--\x1b[0m\x1b[36mproject\x1b[0m"
+
+    assert ANSI_ESCAPE.sub("", styled) == "--project"
 
 
 def test_global_options_are_immutable_raw_parser_output() -> None:
@@ -40,6 +48,7 @@ def test_global_options_are_immutable_raw_parser_output() -> None:
 
 def test_help_exposes_every_global_option() -> None:
     result = runner.invoke(app, ["--help"], color=False)
+    plain_help = ANSI_ESCAPE.sub("", result.stdout)
 
     assert result.exit_code == 0
     for option in (
@@ -57,7 +66,7 @@ def test_help_exposes_every_global_option() -> None:
         "--version",
         "--help",
     ):
-        assert option in result.stdout
+        assert option in plain_help
 
 
 def test_all_global_options_are_accepted_without_business_resolution() -> None:

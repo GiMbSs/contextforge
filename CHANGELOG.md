@@ -31,6 +31,8 @@ development are recorded in the Unreleased section.
   application outcomes, including auditable applied and verified-rollback paths.
 - Fixed cross-platform MyPy validation for Windows lock recovery and installed
   provider dependencies consistently in development and CI environments.
+- Made CLI help assertions independent of ANSI styling emitted by different
+  Typer and Rich combinations across CI runners.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

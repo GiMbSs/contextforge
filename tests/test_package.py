@@ -1,5 +1,6 @@
 """Package and CLI smoke tests for CF-014 increment I001."""
 
+import re
 import subprocess
 import sys
 
@@ -9,6 +10,7 @@ import contextforge
 from contextforge.cli.main import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def test_package_imports_and_exposes_version() -> None:
@@ -24,10 +26,11 @@ def test_version_option_exits_successfully() -> None:
 
 def test_help_option_exits_successfully() -> None:
     result = runner.invoke(app, ["--help"], color=False)
+    plain_help = ANSI_ESCAPE.sub("", result.stdout)
 
     assert result.exit_code == 0
-    assert "Build precise, traceable context" in result.stdout
-    assert "--version" in result.stdout
+    assert "Build precise, traceable context" in plain_help
+    assert "--version" in plain_help
 
 
 def test_unknown_command_returns_usage_error() -> None:
