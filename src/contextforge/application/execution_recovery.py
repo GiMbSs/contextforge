@@ -38,16 +38,27 @@ _DETERMINISTIC_STAGES = frozenset(
 )
 
 
-def assess_execution_recovery(execution: Execution) -> ExecutionRecoveryAssessment:
+def assess_execution_recovery(
+    execution: Execution,
+    *,
+    task_available: bool = True,
+) -> ExecutionRecoveryAssessment:
     """Classify recovery without repeating externally observable operations."""
     if not isinstance(execution, Execution):
         raise TypeError("execution must be an Execution")
+    if not isinstance(task_available, bool):
+        raise TypeError("task_available must be a bool")
     if execution.status.is_terminal:
         return ExecutionRecoveryAssessment(
             RecoveryDisposition.TERMINAL,
             "The execution is already terminal.",
         )
     if execution.stage in _DETERMINISTIC_STAGES:
+        if not task_available:
+            return ExecutionRecoveryAssessment(
+                RecoveryDisposition.MANUAL_REVIEW_REQUIRED,
+                "The original task input is unavailable, so the execution cannot be reconstructed.",
+            )
         return ExecutionRecoveryAssessment(
             RecoveryDisposition.RESUMABLE,
             "The current stage is deterministic and may be reconstructed from persisted state.",

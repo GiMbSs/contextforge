@@ -20,6 +20,9 @@ from contextforge.domain import (
     Execution,
     ExecutionStage,
     ExecutionWorkflow,
+    RequestedOutput,
+    TaskKind,
+    TaskSpecification,
     new_execution_id,
     new_project_id,
     new_task_id,
@@ -132,3 +135,45 @@ def test_running_execution_can_resume_in_another_controller(tmp_path: Path) -> N
     resumed.complete_stage(ExecutionStage.INDEX)
 
     assert resumed.execution.stage is ExecutionStage.INDEX
+
+
+def test_execution_task_survives_storage_reopen_and_is_immutable(tmp_path: Path) -> None:
+    task = TaskSpecification(
+        new_task_id(),
+        "Explain the recovery pipeline",
+        TaskKind.EXPLAIN,
+        RequestedOutput.ANALYSIS,
+        constraints=("Do not modify files",),
+        metadata=(("source", "cli"),),
+    )
+    execution = Execution(new_execution_id(), new_project_id(), task.task_id)
+    storage = _storage(tmp_path)
+    ExecutionController(execution, storage)
+
+    storage.save_task(execution.execution_id, task)
+    storage.save_task(execution.execution_id, task)
+
+    assert _storage(tmp_path).load_task(execution.execution_id) == task
+    replacement = TaskSpecification(
+        task.task_id,
+        "Different task text",
+        task.task_kind,
+        task.requested_output,
+    )
+    with pytest.raises(ExecutionStorageError, match="cannot be replaced"):
+        storage.save_task(execution.execution_id, replacement)
+
+
+def test_execution_task_must_match_execution_identity(tmp_path: Path) -> None:
+    execution = Execution(new_execution_id(), new_project_id(), new_task_id())
+    storage = _storage(tmp_path)
+    ExecutionController(execution, storage)
+    unrelated = TaskSpecification(
+        new_task_id(),
+        "Unrelated task",
+        TaskKind.ANALYZE,
+        RequestedOutput.ANALYSIS,
+    )
+
+    with pytest.raises(ExecutionStorageError, match="does not belong"):
+        storage.save_task(execution.execution_id, unrelated)

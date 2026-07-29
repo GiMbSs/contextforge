@@ -11,6 +11,8 @@ development are recorded in the Unreleased section.
 - Added end-to-end patch-proposal generation through `contextforge run`.
 - Added project-scoped execution history and conservative recovery
   classification.
+- Persisted immutable task specifications with execution identity binding for
+  restart-safe reconstruction.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

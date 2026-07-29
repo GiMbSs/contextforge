@@ -154,6 +154,11 @@ artifacts automatically. Context and prompt records produced by `run` remain
 under `.contextforge/executions/`.
 
 Each `run` also persists its execution snapshot and immutable stage outcomes.
+The normalized task specification is stored as an immutable `task.json` record
+inside the execution directory so deterministic recovery can reconstruct the
+original request after a process restart. Because this record contains the
+original task text, protect `.contextforge/executions/` with the same access
+controls as the project source.
 `contextforge status` reports the latest execution identifier, workflow, stage,
 and terminal status. Analysis workflows complete after response validation;
 proposal-generation workflows are durably recorded at `await_approval`.
@@ -178,6 +183,8 @@ boundaries are `awaiting_action`; stages with externally observable effects
 require `manual_review_required`; and completed or cancelled executions are
 `terminal`. ContextForge never automatically replays a provider call or project
 mutation whose outcome may already be externally visible.
+Legacy executions without a persisted task are classified as
+`manual_review_required`.
 
 Inspect the project lock:
 

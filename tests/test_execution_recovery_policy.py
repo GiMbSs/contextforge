@@ -49,6 +49,18 @@ def test_deterministic_stage_is_resumable() -> None:
     assert assessment.resume_from is ExecutionStage.INDEX
 
 
+def test_deterministic_stage_without_task_requires_manual_review() -> None:
+    execution = _running_at(
+        ExecutionStage.INDEX,
+        workflow=ExecutionWorkflow.ANALYSIS,
+    )
+
+    assessment = assess_execution_recovery(execution, task_available=False)
+
+    assert assessment.disposition is RecoveryDisposition.MANUAL_REVIEW_REQUIRED
+    assert assessment.resume_from is None
+
+
 def test_provider_stage_requires_manual_review() -> None:
     execution = _running_at(ExecutionStage.INVOKE_PROVIDER)
 

@@ -27,6 +27,7 @@ from contextforge.domain import (
     ExecutionWorkflow,
     ProjectId,
     TaskId,
+    TaskSpecification,
 )
 from contextforge.project import ProjectRoot
 from contextforge.shared import SerializationEnvelope
@@ -34,6 +35,7 @@ from contextforge.shared import SerializationEnvelope
 _SCHEMA_VERSION = "1.0"
 _EXECUTION_SCHEMA = "contextforge.execution"
 _STAGE_SCHEMA = "contextforge.execution_stage"
+_TASK_SCHEMA = "contextforge.execution_task"
 
 
 class ExecutionStorageError(RuntimeError):
@@ -165,6 +167,38 @@ class FilesystemExecutionControlStorage:
             return
         self._write_atomic(destination, serialized)
 
+    def save_task(self, execution_id: ExecutionId, task: TaskSpecification) -> None:
+        """Persist the immutable task input correlated with an execution."""
+        execution = self.load_execution(execution_id)
+        if execution is None:
+            raise ExecutionStorageError("Cannot persist a task without its execution")
+        if execution.task_id != task.task_id:
+            raise ExecutionStorageError("Task does not belong to the requested execution")
+        destination = self._task_path(execution_id)
+        envelope = SerializationEnvelope(
+            _TASK_SCHEMA,
+            _SCHEMA_VERSION,
+            str(task.task_id),
+            self._clock(),
+            "execution-control-v1",
+            task.to_dict(),
+            {
+                "execution_id": str(execution_id),
+                "project_id": str(execution.project_id),
+            },
+        )
+        serialized = envelope.to_json() + "\n"
+        if destination.is_file():
+            existing = self._load_envelope(destination)
+            if (
+                existing.schema_name != _TASK_SCHEMA
+                or existing.artifact_id != str(task.task_id)
+                or _object(existing.to_dict()["payload"], "task payload") != task.to_dict()
+            ):
+                raise ExecutionStorageError("Execution task cannot be replaced")
+            return
+        self._write_atomic(destination, serialized)
+
     def load_execution(self, execution_id: ExecutionId) -> Execution | None:
         destination = self._execution_path(execution_id)
         if not destination.is_file():
@@ -230,6 +264,33 @@ class FilesystemExecutionControlStorage:
                 raise ExecutionStorageError("Invalid stage outcome") from error
         return tuple(restored)
 
+    def load_task(self, execution_id: ExecutionId) -> TaskSpecification | None:
+        """Restore the validated task input correlated with an execution."""
+        destination = self._task_path(execution_id)
+        if not destination.is_file():
+            return None
+        execution = self.load_execution(execution_id)
+        if execution is None:
+            raise ExecutionStorageError("Execution task has no execution snapshot")
+        envelope = self._load_envelope(destination)
+        metadata = _object(envelope.metadata, "task metadata")
+        if (
+            envelope.schema_name != _TASK_SCHEMA
+            or envelope.artifact_id != str(execution.task_id)
+            or metadata.get("execution_id") != str(execution_id)
+            or metadata.get("project_id") != str(execution.project_id)
+        ):
+            raise ExecutionStorageError("Task record is not bound to the requested execution")
+        try:
+            task = TaskSpecification.from_dict(
+                _object(envelope.to_dict()["payload"], "task payload")
+            )
+        except (TypeError, ValueError, KeyError) as error:
+            raise ExecutionStorageError("Invalid execution task") from error
+        if task.task_id != execution.task_id:
+            raise ExecutionStorageError("Task record is not bound to the requested execution")
+        return task
+
     def find_by_task(self, task_id: TaskId) -> Execution | None:
         """Find the newest persisted execution correlated with a task."""
         if not self._directory.is_dir():
@@ -274,6 +335,9 @@ class FilesystemExecutionControlStorage:
 
     def _execution_path(self, execution_id: ExecutionId) -> Path:
         return self._execution_directory(execution_id) / "execution.json"
+
+    def _task_path(self, execution_id: ExecutionId) -> Path:
+        return self._execution_directory(execution_id) / "task.json"
 
     @staticmethod
     def _load_envelope(destination: Path) -> SerializationEnvelope:

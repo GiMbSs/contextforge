@@ -311,13 +311,19 @@ class LocalProjectCommandGateway:
         metadata = root.path / ".contextforge"
         configuration = metadata / "config.toml"
         initialized = metadata.is_dir()
-        latest_execution = FilesystemExecutionControlStorage(root).load_latest(_project_id(root))
+        storage = FilesystemExecutionControlStorage(root)
+        latest_execution = storage.load_latest(_project_id(root))
         return CliCommandResult(
             {
                 "command": "status",
                 "configuration_present": configuration.is_file(),
                 "execution": (
-                    _execution_payload(latest_execution) if latest_execution is not None else None
+                    _execution_payload(
+                        latest_execution,
+                        task_available=storage.load_task(latest_execution.execution_id) is not None,
+                    )
+                    if latest_execution is not None
+                    else None
                 ),
                 "initialized": initialized,
                 "project_id": str(_project_id(root)),
@@ -392,6 +398,7 @@ class LocalProjectCommandGateway:
             TaskKind.EXPLAIN,
             RequestedOutput.ANALYSIS,
         )
+        storage = FilesystemExecutionControlStorage(root)
         controller = ExecutionController(
             Execution(
                 new_execution_id(),
@@ -399,8 +406,9 @@ class LocalProjectCommandGateway:
                 task.task_id,
                 workflow=ExecutionWorkflow.ANALYSIS,
             ),
-            FilesystemExecutionControlStorage(root),
+            storage,
         )
+        storage.save_task(controller.execution.execution_id, task)
         controller.complete_stage(ExecutionStage.SCAN)
         inventory = self._scan(root)
         controller.complete_stage(ExecutionStage.INDEX, inventory.diagnostics)
@@ -459,6 +467,7 @@ class LocalProjectCommandGateway:
             TaskKind.MODIFY,
             RequestedOutput.PATCH_PROPOSAL,
         )
+        storage = FilesystemExecutionControlStorage(root)
         controller = ExecutionController(
             Execution(
                 new_execution_id(),
@@ -466,8 +475,9 @@ class LocalProjectCommandGateway:
                 task.task_id,
                 workflow=ExecutionWorkflow.PATCH,
             ),
-            FilesystemExecutionControlStorage(root),
+            storage,
         )
+        storage.save_task(controller.execution.execution_id, task)
         controller.complete_stage(ExecutionStage.SCAN)
         inventory = self._scan(root)
         controller.complete_stage(ExecutionStage.INDEX, inventory.diagnostics)
@@ -1068,7 +1078,10 @@ class LocalProjectCommandGateway:
                 {
                     "command": "execution list",
                     "executions": [
-                        _execution_payload(item)
+                        _execution_payload(
+                            item,
+                            task_available=storage.load_task(item.execution_id) is not None,
+                        )
                         for item in storage.list_executions(_project_id(root))
                     ],
                     "status": "available",
@@ -1103,7 +1116,10 @@ class LocalProjectCommandGateway:
         return CliCommandResult(
             {
                 "command": f"execution {operation}",
-                "execution": _execution_payload(execution),
+                "execution": _execution_payload(
+                    execution,
+                    task_available=storage.load_task(execution.execution_id) is not None,
+                ),
                 "stage_outcomes": [
                     {
                         "diagnostics": _diagnostics(item.diagnostics),
@@ -1386,8 +1402,12 @@ def _execution_not_found() -> CliCommandResult:
     )
 
 
-def _execution_payload(execution: Execution) -> dict[str, object]:
-    recovery = assess_execution_recovery(execution)
+def _execution_payload(
+    execution: Execution,
+    *,
+    task_available: bool,
+) -> dict[str, object]:
+    recovery = assess_execution_recovery(execution, task_available=task_available)
     return {
         "completed_stages": [stage.value for stage in execution.completed_stages],
         "execution_id": str(execution.execution_id),

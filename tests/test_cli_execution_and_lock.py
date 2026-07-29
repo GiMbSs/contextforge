@@ -13,7 +13,15 @@ from contextforge.adapters.filesystem import (
 from contextforge.adapters.project_commands import _project_id
 from contextforge.application import ExecutionController
 from contextforge.cli.main import app
-from contextforge.domain import Execution, new_execution_id, new_project_id, new_task_id
+from contextforge.domain import (
+    Execution,
+    RequestedOutput,
+    TaskKind,
+    TaskSpecification,
+    new_execution_id,
+    new_project_id,
+    new_task_id,
+)
 from contextforge.project import ProjectRoot, ProjectRootSource
 
 runner = CliRunner()
@@ -71,6 +79,15 @@ def test_execution_list_is_scoped_to_the_resolved_project(tmp_path: Path) -> Non
     excluded = Execution(new_execution_id(), new_project_id(), new_task_id())
     ExecutionController(included, storage)
     ExecutionController(excluded, storage)
+    storage.save_task(
+        included.execution_id,
+        TaskSpecification(
+            included.task_id,
+            "Included task",
+            TaskKind.ANALYZE,
+            RequestedOutput.ANALYSIS,
+        ),
+    )
 
     result = runner.invoke(
         app,

@@ -16,7 +16,8 @@ workflows for building precise, traceable LLM context from a software project.
 - Durable, versioned inventory and index snapshots with incremental reuse across
   separate CLI executions.
 - Durable execution lifecycle snapshots and immutable per-stage diagnostics,
-  with distinct analysis and patch workflow paths.
+  with identity-bound task specifications and distinct analysis and patch
+  workflow paths.
 - Cross-process patch lifecycle continuation and ownership-verified exclusive
   locking during project mutation.
 - CLI history, inspection, cancellation, and recovery classification for
