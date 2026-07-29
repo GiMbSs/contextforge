@@ -21,6 +21,8 @@ development are recorded in the Unreleased section.
   responses.
 - Added offline patch-response validation with stale-project rejection,
   durable proposal materialization, and explicit approval handoff.
+- Bound patch approval and application continuation to the exact persisted
+  proposal result instead of relying on reusable task identity.
 - Stopped echoing complete task text in default command output.
 
 ## [0.1.0] - 2026-07-26

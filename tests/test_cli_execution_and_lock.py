@@ -463,6 +463,51 @@ def test_execution_validate_materializes_patch_proposal(
     result = storage.load_result(execution.execution_id)
     assert result is not None
     assert result["result_type"] == "patch_proposal"
+    proposal_id = payload["proposal_id"]
+    assert isinstance(proposal_id, str)
+
+    approved = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--non-interactive",
+            "--format",
+            "json",
+            "patch",
+            "approve",
+            proposal_id,
+            "--approve",
+            proposal_id,
+        ],
+    )
+
+    assert approved.exit_code == 0, approved.stdout
+    after_approval = storage.load_execution(execution.execution_id)
+    assert after_approval is not None
+    assert after_approval.stage is ExecutionStage.APPLY
+
+    applied = runner.invoke(
+        app,
+        [
+            "--project",
+            str(tmp_path),
+            "--format",
+            "json",
+            "patch",
+            "apply",
+            proposal_id,
+        ],
+    )
+
+    assert applied.exit_code == 0, applied.stdout
+    completed = storage.load_execution(execution.execution_id)
+    assert completed is not None
+    assert completed.stage is ExecutionStage.COMPLETE
+    assert completed.status.value == "completed"
+    assert (tmp_path / "src" / "contextforge_generated.py").read_text(
+        encoding="utf-8"
+    ) == "value = 42\n"
 
 
 def test_execution_validate_rejects_patch_when_project_changed_after_invocation(

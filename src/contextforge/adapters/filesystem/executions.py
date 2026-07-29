@@ -25,6 +25,7 @@ from contextforge.domain import (
     ExecutionStage,
     ExecutionStatus,
     ExecutionWorkflow,
+    PatchProposalId,
     ProjectId,
     TaskId,
     TaskSpecification,
@@ -456,6 +457,34 @@ class FilesystemExecutionControlStorage:
             except (ExecutionStorageError, ValueError):
                 continue
             if execution is not None and execution.task_id == task_id:
+                matches.append((destination.stat().st_mtime_ns, execution))
+        return max(matches, key=lambda item: item[0])[1] if matches else None
+
+    def find_by_patch_proposal(
+        self,
+        proposal_id: PatchProposalId,
+    ) -> Execution | None:
+        """Find the execution whose validated result produced a proposal."""
+        if not isinstance(proposal_id, PatchProposalId):
+            raise TypeError("proposal_id must be a PatchProposalId")
+        if not self._directory.is_dir():
+            return None
+        matches: list[tuple[int, Execution]] = []
+        for destination in self._directory.glob("execution_*/result.json"):
+            try:
+                execution_id = ExecutionId.from_string(destination.parent.name)
+                result = self.load_result(execution_id)
+                execution = self.load_execution(execution_id)
+            except (ExecutionStorageError, ValueError):
+                continue
+            if result is None or execution is None:
+                continue
+            payload = result.get("result")
+            if (
+                result.get("result_type") == "patch_proposal"
+                and isinstance(payload, Mapping)
+                and payload.get("proposal_id") == str(proposal_id)
+            ):
                 matches.append((destination.stat().st_mtime_ns, execution))
         return max(matches, key=lambda item: item[0])[1] if matches else None
 

@@ -213,6 +213,11 @@ project fingerprint changed, materialized as a durable proposal, and advanced
 to `await_approval`. Invalid responses fail the execution closed, and validation
 never invokes the provider again.
 
+Approving that proposal advances its exact originating execution to `apply`;
+successful application completes the same execution. The binding uses the
+persisted proposal identifier, so rerunning a task cannot redirect approval or
+application to another execution.
+
 Inspect the project lock:
 
 ```bash

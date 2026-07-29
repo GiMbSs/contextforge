@@ -2094,7 +2094,9 @@ def _patch_execution_controller(
     proposal: PatchProposal,
 ) -> ExecutionController | None:
     storage = FilesystemExecutionControlStorage(root)
-    execution = storage.find_by_task(proposal.task_id)
+    execution = storage.find_by_patch_proposal(proposal.proposal_id)
+    if execution is None:
+        execution = storage.find_by_task(proposal.task_id)
     if execution is None or execution.status.is_terminal:
         return None
     return ExecutionController.resume(execution, storage)
