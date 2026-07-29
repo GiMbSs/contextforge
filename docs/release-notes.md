@@ -1,5 +1,40 @@
 # Release Notes
 
+## ContextForge 0.1.1
+
+**Release date:** 2026-07-29
+
+ContextForge 0.1.1 consolidates the implemented MVP with measurable retrieval
+quality, grounded analysis validation, and reproducible offline release
+artifacts.
+
+### Improvements
+
+- Signals insufficient evidence instead of presenting lexical fallback as
+  complete context.
+- Resolves internal Python relationships across files and uses them as
+  traceable structural ranking evidence.
+- Expands the reviewed offline benchmark from 8 to 12 cases, covering
+  test-to-production navigation, deep dependency chains, and homonymous
+  symbols.
+- Rejects unsupported completion claims, findings without evidence, and
+  references outside the supplied Context Bundle.
+- Supports inclusive `--maximum` evaluation bounds and enforces a zero
+  irrelevant-context ratio in the reviewed `core` 1.2 gate.
+- Builds wheel and source archives without network-dependent isolation and
+  normalizes archive metadata for reproducible hashes.
+- Updates CI and product documentation to match the implemented behavior.
+
+### Validation
+
+- Canonical 13-step MVP acceptance scenario revalidated.
+- Reviewed evaluation suite: 12 cases, 0 execution failures.
+- Full automated suite: 1,165 passed and 8 platform-dependent symlink tests
+  skipped during release preparation.
+
+Release checksums are stored in
+`dist/contextforge-0.1.1.checksums.txt`.
+
 ## ContextForge 0.1.0
 
 **Release date:** 2026-07-26

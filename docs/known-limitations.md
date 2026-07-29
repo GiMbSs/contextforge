@@ -1,6 +1,6 @@
 # Known Limitations
 
-This page documents known limitations of ContextForge 0.1.0.
+This page documents known limitations of ContextForge 0.1.1.
 
 ## Provider support
 

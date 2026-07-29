@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-This matrix records the supported runtime combinations for ContextForge 0.1.0.
+This matrix records the supported runtime combinations for ContextForge 0.1.1.
 
 ## Python versions
 

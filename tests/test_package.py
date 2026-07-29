@@ -14,14 +14,14 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def test_package_imports_and_exposes_version() -> None:
-    assert contextforge.__version__ == "0.1.0"
+    assert contextforge.__version__ == "0.1.1"
 
 
 def test_version_option_exits_successfully() -> None:
     result = runner.invoke(app, ["--version"], color=False)
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == "contextforge 0.1.0"
+    assert result.stdout.strip() == "contextforge 0.1.1"
 
 
 def test_help_option_exits_successfully() -> None:
@@ -49,4 +49,4 @@ def test_module_entry_point_exposes_version() -> None:
     )
 
     assert completed.returncode == 0
-    assert completed.stdout.strip() == "contextforge 0.1.0"
+    assert completed.stdout.strip() == "contextforge 0.1.1"

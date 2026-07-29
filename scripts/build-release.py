@@ -105,7 +105,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--version",
-        default="0.1.0",
+        default="0.1.1",
         help="Release version used in the checksum file name.",
     )
     arguments = parser.parse_args()

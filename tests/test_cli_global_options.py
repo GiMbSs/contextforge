@@ -96,4 +96,4 @@ def test_all_global_options_are_accepted_without_business_resolution() -> None:
     )
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == "contextforge 0.1.0"
+    assert result.stdout.strip() == "contextforge 0.1.1"
