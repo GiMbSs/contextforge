@@ -1,0 +1,22 @@
+{
+  "configuration_fingerprint": "sha256:898706177539f13735ce24462885f9af887ab1de7837c6fede228756959f1f21",
+  "primary_aggregates": {
+    "complete-evidence": 0.625,
+    "context-precision": 0.875,
+    "context-required-evidence-retained": 0.6875,
+    "judged-precision": 0.875,
+    "ndcg": 0.580865,
+    "required-artifact-recall": 0.6875
+  },
+  "reviewed_thresholds": {
+    "complete-evidence": 0.625,
+    "context-precision": 0.875,
+    "ndcg": 0.58,
+    "required-artifact-recall": 0.6875
+  },
+  "schema": "contextforge.evaluation-baseline",
+  "schema_version": "1",
+  "stable_runs": 2,
+  "suite_id": "core",
+  "suite_version": "1.1"
+}

@@ -60,5 +60,16 @@ jobs:
           --fail-on-case-error
           --minimum required-artifact-recall=1.0
 
+      - name: Run reviewed evaluation baseline gate
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: >-
+          contextforge evaluate tests/fixtures/evaluation/suites/core.json
+          --output /tmp/contextforge-evaluation/core
+          --fail-on-case-error
+          --minimum complete-evidence=0.625
+          --minimum context-precision=0.875
+          --minimum ndcg=0.58
+          --minimum required-artifact-recall=0.6875
+
       - name: Verify package build
         run: python -m build

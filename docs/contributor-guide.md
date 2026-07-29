@@ -152,6 +152,11 @@ thresholds are benchmark changes. Keep those changes visible in the pull
 request, explain the new baseline, and obtain review rather than weakening a
 threshold solely to make CI pass.
 
+The reviewed aggregate values and thresholds are versioned in
+`tests/fixtures/evaluation/baselines/core-1.1.json`. Regenerate the suite twice,
+confirm matching configuration fingerprints and aggregate metrics, and review
+the resulting quality change before updating that file.
+
 ## Security
 
 Report vulnerabilities privately as described in `SECURITY.md`. Never commit

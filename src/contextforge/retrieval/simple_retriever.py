@@ -192,7 +192,10 @@ class SimpleContextRetriever:
             path_hits = _unique_hits(keywords, path)
             name_hits = _unique_hits(keywords, symbol.name)
             content_hits = _unique_hits(keywords, symbol.signature or "")
-            score = 3 * len(path_hits) + 2 * len(name_hits) + len(content_hits)
+            # A symbol-name match is more specific than a path/content token match.
+            # Keep it dominant so generic filenames cannot displace the definition
+            # under a one-artifact budget.
+            score = 3 * len(path_hits) + 6 * len(name_hits) + len(content_hits)
             estimated_bytes = self._estimate_artifact_bytes_from_units(
                 units_by_artifact, symbol.artifact_id
             )

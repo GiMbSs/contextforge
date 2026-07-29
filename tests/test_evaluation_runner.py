@@ -150,6 +150,21 @@ def test_unsolvable_case_reports_zero_required_recall_without_failing() -> None:
     assert primary_recall.value == 0.0
 
 
+def test_direct_symbol_case_prioritizes_the_defining_artifact() -> None:
+    loader = FilesystemEvaluationSuiteLoader(FIXTURE_ROOT)
+    result = EvaluationRunner(
+        FilesystemEvaluationCaseExecutor(loader),
+        clock=lambda: FIXED_TIME,
+    ).run(_suite(), case_ids=("direct-symbol",))
+
+    primary_recall = next(
+        metric
+        for metric in result.run.metric_results
+        if metric.strategy_id == "contextforge" and metric.metric_name == "required-artifact-recall"
+    )
+    assert primary_recall.value == 1.0
+
+
 class _IsolationRecordingExecutor(FilesystemEvaluationCaseExecutor):
     seen_root: Path | None = None
 

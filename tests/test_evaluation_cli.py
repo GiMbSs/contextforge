@@ -13,6 +13,7 @@ from contextforge.cli.main import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
 SUITE = Path(__file__).parent / "fixtures" / "evaluation" / "suites" / "core.json"
+BASELINE = Path(__file__).parent / "fixtures" / "evaluation" / "baselines" / "core-1.1.json"
 
 
 def test_evaluate_writes_reports_offline_for_successful_case(
@@ -56,6 +57,29 @@ def test_evaluate_threshold_failure_uses_stable_exit_code(tmp_path: Path) -> Non
 
     assert result.exit_code == 20
     assert "Regression: not-measured=missing" in result.stderr
+
+
+def test_reviewed_core_baseline_thresholds_pass(tmp_path: Path) -> None:
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+    arguments = [
+        "evaluate",
+        str(SUITE),
+        "--output",
+        str(tmp_path / "latest"),
+        "--fail-on-case-error",
+    ]
+    for metric_name, minimum in baseline["reviewed_thresholds"].items():
+        arguments.extend(("--minimum", f"{metric_name}={minimum}"))
+
+    result = runner.invoke(
+        app,
+        arguments,
+    )
+
+    assert baseline["stable_runs"] == 2
+    assert baseline["suite_version"] == "1.1"
+    assert result.exit_code == 0
+    assert "8 cases, 0 failed" in result.stdout
 
 
 def test_evaluate_can_fail_when_a_selected_case_errors(

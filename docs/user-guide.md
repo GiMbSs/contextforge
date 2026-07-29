@@ -382,6 +382,18 @@ A failed threshold exits with code `20`; suite, configuration, output, or
 opted-in case failures exit with code `19`. Evaluation does not invoke a provider by default.
 Patch-oriented fixtures are copied to a temporary directory before execution.
 
+The reviewed `core` 1.1 baseline is enforced in CI after two identical
+deterministic runs. Its primary thresholds are:
+
+- `complete-evidence=0.625`
+- `context-precision=0.875`
+- `ndcg=0.58`
+- `required-artifact-recall=0.6875`
+
+The intentionally unsolvable case remains in this aggregate, so the global
+required-artifact recall is not expected to be `1.0`. The direct-path smoke
+case retains its separate `1.0` recall requirement.
+
 ## Diagnostics and troubleshooting
 
 Run the full local quality gate:
