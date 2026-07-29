@@ -77,3 +77,55 @@ def test_checksum_file_matches_artifacts(dist_dir: Path) -> None:
         assert artifact.name in checksums, f"missing checksum for {artifact.name}"
         expected = hashlib.sha256(artifact.read_bytes()).hexdigest()
         assert checksums[artifact.name] == expected
+
+
+def test_release_build_is_reproducible_offline(tmp_path: Path) -> None:
+    """Two network-independent builds produce identical package hashes."""
+    repo_root = Path(__file__).resolve().parent.parent
+    work_dir = tmp_path / "repo"
+    shutil.copytree(
+        repo_root,
+        work_dir,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".mypy_cache",
+            "dist",
+            "build",
+            ".venv",
+            "venv",
+        ),
+    )
+    command = [sys.executable, str(work_dir / "scripts" / "build-release.py")]
+    environment = {"PATH": "", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "315532800"}
+
+    subprocess.run(
+        command,
+        cwd=work_dir,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    first = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (work_dir / "dist").iterdir()
+        if path.suffix in {".whl", ".gz"}
+    }
+    subprocess.run(
+        command,
+        cwd=work_dir,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    second = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (work_dir / "dist").iterdir()
+        if path.suffix in {".whl", ".gz"}
+    }
+
+    assert first == second

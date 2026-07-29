@@ -13,7 +13,7 @@ from contextforge.cli.main import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
 SUITE = Path(__file__).parent / "fixtures" / "evaluation" / "suites" / "core.json"
-BASELINE = Path(__file__).parent / "fixtures" / "evaluation" / "baselines" / "core-1.1.json"
+BASELINE = Path(__file__).parent / "fixtures" / "evaluation" / "baselines" / "core-1.2.json"
 
 
 def test_evaluate_writes_reports_offline_for_successful_case(
@@ -59,6 +59,25 @@ def test_evaluate_threshold_failure_uses_stable_exit_code(tmp_path: Path) -> Non
     assert "Regression: not-measured=missing" in result.stderr
 
 
+def test_evaluate_maximum_threshold_rejects_excess(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            str(SUITE),
+            "--case",
+            "direct-path",
+            "--output",
+            str(tmp_path / "latest"),
+            "--maximum",
+            "context-precision=0.5",
+        ],
+    )
+
+    assert result.exit_code == 20
+    assert "Regression: context-precision=1.000000 (maximum 0.500000)" in result.stderr
+
+
 def test_reviewed_core_baseline_thresholds_pass(tmp_path: Path) -> None:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     arguments = [
@@ -70,6 +89,8 @@ def test_reviewed_core_baseline_thresholds_pass(tmp_path: Path) -> None:
     ]
     for metric_name, minimum in baseline["reviewed_thresholds"].items():
         arguments.extend(("--minimum", f"{metric_name}={minimum}"))
+    for metric_name, maximum in baseline["reviewed_maximums"].items():
+        arguments.extend(("--maximum", f"{metric_name}={maximum}"))
 
     result = runner.invoke(
         app,
@@ -77,7 +98,7 @@ def test_reviewed_core_baseline_thresholds_pass(tmp_path: Path) -> None:
     )
 
     assert baseline["stable_runs"] == 2
-    assert baseline["suite_version"] == "1.1"
+    assert baseline["suite_version"] == "1.2"
     assert result.exit_code == 0
     assert "12 cases, 0 failed" in result.stdout
 

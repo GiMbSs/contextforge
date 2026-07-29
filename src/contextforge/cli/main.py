@@ -353,17 +353,30 @@ def _evaluation_loader(suite_path: Path) -> tuple[FilesystemEvaluationSuiteLoade
     raise ValueError("evaluation suite must be below a root containing projects/")
 
 
-def _parse_thresholds(values: list[str] | None) -> tuple[MetricThreshold, ...]:
+def _parse_thresholds(
+    minimum_values: list[str] | None,
+    maximum_values: list[str] | None,
+) -> tuple[MetricThreshold, ...]:
     thresholds: list[MetricThreshold] = []
-    for value in values or ():
-        metric_name, separator, serialized_minimum = value.partition("=")
-        if not separator or not metric_name.strip():
-            raise ValueError("thresholds must use METRIC=MINIMUM")
-        try:
-            minimum = float(serialized_minimum)
-        except ValueError as error:
-            raise ValueError("threshold minimum must be numeric") from error
-        thresholds.append(MetricThreshold(metric_name.strip(), minimum))
+    for bound_name, values in (
+        ("minimum", minimum_values),
+        ("maximum", maximum_values),
+    ):
+        for value in values or ():
+            metric_name, separator, serialized_bound = value.partition("=")
+            if not separator or not metric_name.strip():
+                raise ValueError(f"thresholds must use METRIC={bound_name.upper()}")
+            try:
+                bound = float(serialized_bound)
+            except ValueError as error:
+                raise ValueError(f"threshold {bound_name} must be numeric") from error
+            thresholds.append(
+                MetricThreshold(
+                    metric_name.strip(),
+                    minimum=bound if bound_name == "minimum" else None,
+                    maximum=bound if bound_name == "maximum" else None,
+                )
+            )
     if len({item.metric_name for item in thresholds}) != len(thresholds):
         raise ValueError("threshold metric names must be unique")
     return tuple(thresholds)
@@ -394,6 +407,13 @@ def evaluate(
             help="Require a primary aggregate METRIC=MINIMUM; repeatable and opt-in.",
         ),
     ] = None,
+    maximum: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--maximum",
+            help="Require a primary aggregate METRIC=MAXIMUM; repeatable and opt-in.",
+        ),
+    ] = None,
     fail_on_case_error: Annotated[
         bool,
         typer.Option(
@@ -405,7 +425,7 @@ def evaluate(
     """Run a deterministic, read-only effectiveness evaluation."""
     try:
         loader, relative_suite = _evaluation_loader(suite)
-        thresholds = _parse_thresholds(minimum)
+        thresholds = _parse_thresholds(minimum, maximum)
         evaluation_suite = loader.load(relative_suite)
         result = EvaluationRunner(
             FilesystemEvaluationCaseExecutor(loader),
@@ -442,8 +462,13 @@ def evaluate(
     if not gate.passed:
         for failure in gate.failures:
             actual = "missing" if failure.actual is None else f"{failure.actual:.6f}"
+            if failure.minimum is not None:
+                bound = f"minimum {failure.minimum:.6f}"
+            else:
+                assert failure.maximum is not None
+                bound = f"maximum {failure.maximum:.6f}"
             typer.echo(
-                f"Regression: {failure.metric_name}={actual} (minimum {failure.minimum:.6f})",
+                f"Regression: {failure.metric_name}={actual} ({bound})",
                 err=True,
             )
         raise typer.Exit(int(CliExitCode.EVALUATION_REGRESSION))

@@ -14,22 +14,66 @@ passes.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
+import os
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
+
+REPRODUCIBLE_TIMESTAMP = 315532800
 
 
 def _run_build(dist_dir: Path) -> list[Path]:
-    """Clean dist/ and run ``python -m build``."""
+    """Clean dist/ and build without network-dependent isolation."""
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
+    environment = os.environ.copy()
+    environment.setdefault("PYTHONHASHSEED", "0")
+    environment.setdefault("SOURCE_DATE_EPOCH", str(REPRODUCIBLE_TIMESTAMP))
     subprocess.run(
-        [sys.executable, "-m", "build"],
+        [sys.executable, "-m", "build", "--no-isolation"],
         check=True,
+        env=environment,
     )
-    return sorted(dist_dir.iterdir())
+    artifacts = sorted(dist_dir.iterdir())
+    for artifact in artifacts:
+        if artifact.name.endswith(".tar.gz"):
+            _normalize_sdist(artifact)
+    return artifacts
+
+
+def _normalize_sdist(path: Path) -> None:
+    """Rewrite one source archive with stable gzip and tar metadata."""
+    entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with tarfile.open(path, "r:gz") as source:
+        for member in source.getmembers():
+            extracted = source.extractfile(member) if member.isfile() else None
+            entries.append((member, extracted.read() if extracted is not None else None))
+
+    temporary = path.with_name(f".{path.name}.tmp")
+    with (
+        temporary.open("wb") as raw,
+        gzip.GzipFile(
+            filename="",
+            mode="wb",
+            fileobj=raw,
+            mtime=REPRODUCIBLE_TIMESTAMP,
+        ) as compressed,
+        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as target,
+    ):
+        for member, content in entries:
+            member.mtime = REPRODUCIBLE_TIMESTAMP
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.pax_headers = {}
+            target.addfile(member, None if content is None else io.BytesIO(content))
+    temporary.replace(path)
 
 
 def _sha256_file(path: Path) -> str:
