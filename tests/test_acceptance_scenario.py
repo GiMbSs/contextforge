@@ -376,12 +376,14 @@ def test_canonical_mvp_acceptance_scenario(root: Path) -> None:
         approval_method="non_interactive",
     )
     assert approve_result.exit_code == 0
+    assert approve_result.data["execution_id"] == proposal_result.data["execution_id"]
     transcript.append(_transcript_entry(10, "patch approve", approve_result.data))
 
     # 11. Apply proposal safely.
     apply_result = gateway.apply_patch_proposal(root, proposal_id)
     assert apply_result.exit_code == 0
     assert apply_result.data["status"] == "applied"
+    assert apply_result.data["execution_id"] == proposal_result.data["execution_id"]
     transcript.append(_transcript_entry(11, "patch apply", apply_result.data))
 
     # 12. Verify resulting project fingerprint.
@@ -403,6 +405,11 @@ def test_canonical_mvp_acceptance_scenario(root: Path) -> None:
     # 13. Confirm traceability and diagnostics.
     diagnostics_result = gateway.diagnostics(root)
     assert diagnostics_result.exit_code == 0
+    status_result = gateway.status(root)
+    execution = status_result.data["execution"]
+    assert isinstance(execution, dict)
+    assert execution["execution_id"] == proposal_result.data["execution_id"]
+    assert execution["status"] == "completed"
     transcript.append(_transcript_entry(13, "diagnostics", diagnostics_result.data))
 
     # Confirm the generated file exists.

@@ -13,7 +13,13 @@ from contextforge.diagnostics import (
     DiagnosticCollection,
     DiagnosticSeverity,
 )
-from contextforge.domain import Execution, ExecutionId, ExecutionStage, InferenceRequestId
+from contextforge.domain import (
+    Execution,
+    ExecutionId,
+    ExecutionStage,
+    ExecutionStatus,
+    InferenceRequestId,
+)
 from contextforge.provider import (
     CancellationResult,
     CancellationStatus,
@@ -81,6 +87,26 @@ class ExecutionController:
         self._cleanups: list[Callable[[], None]] = []
         self._released = False
         self._storage.save_execution(self._execution)
+
+    @classmethod
+    def resume(
+        cls,
+        execution: Execution,
+        storage: ExecutionControlStorage,
+    ) -> ExecutionController:
+        """Continue a persisted non-terminal execution without restarting it."""
+        if not isinstance(execution, Execution):
+            raise TypeError("execution must be an Execution")
+        if execution.status.is_terminal:
+            raise ExecutionControlError("terminal execution cannot be resumed")
+        if execution.status is not ExecutionStatus.RUNNING:
+            raise ExecutionControlError("only a running execution can be resumed")
+        controller = cls.__new__(cls)
+        controller._execution = execution
+        controller._storage = storage
+        controller._cleanups = []
+        controller._released = False
+        return controller
 
     @property
     def execution(self) -> Execution:

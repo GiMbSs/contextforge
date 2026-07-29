@@ -230,6 +230,21 @@ class FilesystemExecutionControlStorage:
                 raise ExecutionStorageError("Invalid stage outcome") from error
         return tuple(restored)
 
+    def find_by_task(self, task_id: TaskId) -> Execution | None:
+        """Find the newest persisted execution correlated with a task."""
+        if not self._directory.is_dir():
+            return None
+        matches: list[tuple[int, Execution]] = []
+        for destination in self._directory.glob("execution_*/execution.json"):
+            try:
+                execution_id = ExecutionId.from_string(destination.parent.name)
+                execution = self.load_execution(execution_id)
+            except (ExecutionStorageError, ValueError):
+                continue
+            if execution is not None and execution.task_id == task_id:
+                matches.append((destination.stat().st_mtime_ns, execution))
+        return max(matches, key=lambda item: item[0])[1] if matches else None
+
     def _execution_directory(self, execution_id: ExecutionId) -> Path:
         return self._directory / str(execution_id)
 

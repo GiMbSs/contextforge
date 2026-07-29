@@ -25,8 +25,10 @@ from contextforge.adapters.filesystem import (
     FilesystemIndexStorage,
     FilesystemInventoryStorage,
     LocalProjectInitialization,
+    LocalProjectLock,
     LocalProjectScanner,
     LocalStagedPatchApplication,
+    ProjectLockUnavailableError,
 )
 from contextforge.adapters.patch_proposals import LocalPatchProposalStorage
 from contextforge.adapters.providers import _DEFAULT_OLLAMA_MODEL, ConfiguredProviderRegistry
@@ -806,6 +808,7 @@ class LocalProjectCommandGateway:
                 "CLI_PATCH_PROPOSAL_NOT_FOUND",
                 "The requested patch proposal is unavailable.",
             )
+        execution_controller = _patch_execution_controller(root, proposal)
         current_fingerprint = self._scan(root).project_fingerprint
         pipeline = PatchApprovalApplicationPipeline(
             storage=storage,
@@ -826,10 +829,20 @@ class LocalProjectCommandGateway:
                         acknowledged_warnings=warning_codes,
                     )
                 )
+                if (
+                    execution_controller is not None
+                    and execution_controller.execution.stage is ExecutionStage.AWAIT_APPROVAL
+                ):
+                    execution_controller.complete_stage(ExecutionStage.APPLY)
                 return CliCommandResult(
                     {
                         "approval_id": str(approved.approval.approval_id),
                         "command": "patch approve",
+                        "execution_id": (
+                            str(execution_controller.execution.execution_id)
+                            if execution_controller is not None
+                            else None
+                        ),
                         "lifecycle_state": approved.lifecycle.state.value,
                         "method": approved.approval.method.value,
                         "project_fingerprint": str(approved.approval.project_fingerprint),
@@ -845,9 +858,16 @@ class LocalProjectCommandGateway:
                         reason or "Rejected interactively.",
                     )
                 )
+                if execution_controller is not None:
+                    execution_controller.cancel()
                 return CliCommandResult(
                     {
                         "command": "patch reject",
+                        "execution_id": (
+                            str(execution_controller.execution.execution_id)
+                            if execution_controller is not None
+                            else None
+                        ),
                         "lifecycle_state": rejected.lifecycle.state.value,
                         "proposal_id": proposal_id,
                         "reason": rejected.reason,
@@ -884,6 +904,7 @@ class LocalProjectCommandGateway:
                 "CLI_PATCH_PROPOSAL_NOT_FOUND",
                 "The requested patch proposal is unavailable.",
             )
+        execution_controller = _patch_execution_controller(root, proposal)
         approval = storage.load_active_approval(selected_id)
         if approval is None:
             failed = _patch_failure(
@@ -905,12 +926,14 @@ class LocalProjectCommandGateway:
             application=application,
         )
         try:
-            result = pipeline.apply(ApplyPatchProposal(selected_id, approval.approval_id))
+            with LocalProjectLock(root, "patch_apply"):
+                result = pipeline.apply(ApplyPatchProposal(selected_id, approval.approval_id))
         except (
             PatchApprovalBindingError,
             PatchApprovalNotFoundError,
             PatchProposalNotFoundError,
             PatchWorkflowStateError,
+            ProjectLockUnavailableError,
             StaleProjectStateError,
         ) as error:
             return _patch_application_failure(error)
@@ -942,6 +965,26 @@ class LocalProjectCommandGateway:
             if applied.status is PatchApplicationStatus.PARTIALLY_APPLIED
             else CliExitCode.PATCH_APPLICATION_FAILURE
         )
+        if execution_controller is not None:
+            if (
+                applied.status is PatchApplicationStatus.APPLIED
+                and execution_controller.execution.stage is ExecutionStage.APPLY
+            ):
+                execution_controller.complete_stage(ExecutionStage.COMPLETE)
+            elif not execution_controller.execution.status.is_terminal:
+                execution_controller.fail(
+                    DiagnosticCollection(
+                        (
+                            Diagnostic(
+                                DiagnosticCode("EXECUTION_PATCH_APPLICATION_FAILED"),
+                                DiagnosticSeverity.ERROR,
+                                "The patch proposal was not fully applied.",
+                                "execution",
+                            ),
+                        )
+                    )
+                )
+            data["execution_id"] = str(execution_controller.execution.execution_id)
         return CliCommandResult(data, exit_code, diagnostics)
 
     def configure(
@@ -1211,6 +1254,17 @@ def _execution_failure_diagnostics(error: Exception) -> DiagnosticCollection:
             ),
         )
     )
+
+
+def _patch_execution_controller(
+    root: ProjectRoot,
+    proposal: PatchProposal,
+) -> ExecutionController | None:
+    storage = FilesystemExecutionControlStorage(root)
+    execution = storage.find_by_task(proposal.task_id)
+    if execution is None or execution.status.is_terminal:
+        return None
+    return ExecutionController.resume(execution, storage)
 
 
 def _context_payload(bundle: ContextBundle) -> dict[str, object]:
@@ -1570,7 +1624,10 @@ def _patch_workflow_failure(error: Exception) -> CliCommandResult:
 
 
 def _patch_application_failure(error: Exception) -> CliCommandResult:
-    if isinstance(error, StaleProjectStateError):
+    if isinstance(error, ProjectLockUnavailableError):
+        code = "CLI_PROJECT_LOCKED"
+        exit_code = CliExitCode.PROJECT_STATE_CONFLICT
+    elif isinstance(error, StaleProjectStateError):
         code = "CLI_PATCH_STALE"
         exit_code = CliExitCode.PROJECT_STATE_CONFLICT
     elif isinstance(error, (PatchApprovalBindingError, PatchApprovalNotFoundError)):

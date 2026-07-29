@@ -118,3 +118,17 @@ def test_analysis_workflow_completes_without_patch_stages(tmp_path: Path) -> Non
 
     assert controller.execution.status.value == "completed"
     assert ExecutionStage.BUILD_PROPOSAL not in controller.execution.completed_stages
+
+
+def test_running_execution_can_resume_in_another_controller(tmp_path: Path) -> None:
+    execution = Execution(new_execution_id(), new_project_id(), new_task_id())
+    storage = _storage(tmp_path)
+    first = ExecutionController(execution, storage)
+    first.complete_stage(ExecutionStage.SCAN)
+
+    restored = storage.find_by_task(execution.task_id)
+    assert restored is not None
+    resumed = ExecutionController.resume(restored, _storage(tmp_path))
+    resumed.complete_stage(ExecutionStage.INDEX)
+
+    assert resumed.execution.stage is ExecutionStage.INDEX

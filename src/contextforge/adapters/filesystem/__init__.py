@@ -6,6 +6,11 @@ from contextforge.adapters.filesystem.executions import (
 )
 from contextforge.adapters.filesystem.initialization import LocalProjectInitialization
 from contextforge.adapters.filesystem.local import LocalProjectTraversal
+from contextforge.adapters.filesystem.locking import (
+    LocalProjectLock,
+    ProjectLockOwnershipError,
+    ProjectLockUnavailableError,
+)
 from contextforge.adapters.filesystem.patches import (
     LocalStagedPatchApplication,
     PreflightEvidenceProvider,
@@ -23,9 +28,12 @@ __all__ = [
     "FilesystemIndexStorage",
     "FilesystemInventoryStorage",
     "LocalProjectInitialization",
+    "LocalProjectLock",
     "LocalProjectScanner",
     "LocalProjectTraversal",
     "LocalStagedPatchApplication",
     "PreflightEvidenceProvider",
+    "ProjectLockOwnershipError",
+    "ProjectLockUnavailableError",
     "ProjectStateStorageError",
 ]

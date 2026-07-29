@@ -157,6 +157,11 @@ Each `run` also persists its execution snapshot and immutable stage outcomes.
 `contextforge status` reports the latest execution identifier, workflow, stage,
 and terminal status. Analysis workflows complete after response validation;
 proposal-generation workflows are durably recorded at `await_approval`.
+Approval and application reopen the correlated execution by task identity:
+approval advances it to `apply`, rejection cancels it, and successful
+application completes it. Patch application holds an exclusive project lock;
+a concurrent application fails with a project-state conflict instead of
+mutating files concurrently.
 
 ## Analysis task
 
